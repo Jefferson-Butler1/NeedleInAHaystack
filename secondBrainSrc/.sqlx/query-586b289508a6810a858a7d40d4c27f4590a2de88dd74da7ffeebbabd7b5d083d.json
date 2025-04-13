@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, start_time, end_time, description, apps_used, keywords\n        FROM activity_summaries\n        WHERE \n            description ILIKE $1 OR\n            $1 = ANY(keywords)\n        ORDER BY start_time DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "start_time",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "end_time",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "apps_used",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 5,
+        "name": "keywords",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "586b289508a6810a858a7d40d4c27f4590a2de88dd74da7ffeebbabd7b5d083d"
+}

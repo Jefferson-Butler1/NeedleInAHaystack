@@ -1,0 +1,192 @@
+{
+  "db": "PostgreSQL",
+  "1a17f0a8dd4fcd882cb65a7aea98f0819a1e3c23": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Timestamptz",
+          "Text",
+          "Jsonb",
+          "Text"
+        ]
+      }
+    },
+    "query": "\n        INSERT INTO user_events (timestamp, event_type, data, app_name)\n        VALUES ($1, $2, $3, $4)\n        "
+  },
+  "4a6dfd31e08b25dcd3e2e1d8c45e3fe4e54ff83e": {
+    "describe": {
+      "columns": [
+        {
+          "name": "id",
+          "ordinal": 0,
+          "type_info": "Int8"
+        },
+        {
+          "name": "timestamp",
+          "ordinal": 1,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "event_type",
+          "ordinal": 2,
+          "type_info": {
+            "Custom": {
+              "name": "event_type",
+              "kind": {
+                "Enum": [
+                  "keystroke",
+                  "mouseclick",
+                  "appswitch",
+                  "screencapture"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "name": "data",
+          "ordinal": 3,
+          "type_info": "Jsonb"
+        },
+        {
+          "name": "app_name",
+          "ordinal": 4,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Timestamptz",
+          "Timestamptz"
+        ]
+      }
+    },
+    "query": "\n        SELECT id, timestamp, event_type as \"event_type: EventType\", data, app_name\n        FROM user_events\n        WHERE timestamp >= $1 AND timestamp <= $2\n        ORDER BY timestamp ASC\n        "
+  },
+  "69e5bb4cf4e96b7eefcd3c88c9b9c9ae33f9e778": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Left": [
+          "Timestamptz",
+          "Timestamptz",
+          "Text",
+          "TextArray",
+          "TextArray"
+        ]
+      }
+    },
+    "query": "\n        INSERT INTO activity_summaries (start_time, end_time, description, apps_used, keywords)\n        VALUES ($1, $2, $3, $4, $5)\n        "
+  },
+  "6c7fc8064a34ad7b5edcbd107ed9c45b09e901be": {
+    "describe": {
+      "columns": [
+        {
+          "name": "id",
+          "ordinal": 0,
+          "type_info": "Int8"
+        },
+        {
+          "name": "start_time",
+          "ordinal": 1,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "end_time",
+          "ordinal": 2,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "description",
+          "ordinal": 3,
+          "type_info": "Text"
+        },
+        {
+          "name": "apps_used",
+          "ordinal": 4,
+          "type_info": "TextArray"
+        },
+        {
+          "name": "keywords",
+          "ordinal": 5,
+          "type_info": "TextArray"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Timestamptz",
+          "Timestamptz"
+        ]
+      }
+    },
+    "query": "\n        SELECT id, start_time, end_time, description, apps_used, keywords\n        FROM activity_summaries\n        WHERE \n            (start_time >= $1 AND start_time <= $2) OR\n            (end_time >= $1 AND end_time <= $2) OR\n            (start_time <= $1 AND end_time >= $2)\n        ORDER BY start_time ASC\n        "
+  },
+  "78a2ca1bbbb3f0ecb3f3c7e49e7c9548afed1e82": {
+    "describe": {
+      "columns": [
+        {
+          "name": "id",
+          "ordinal": 0,
+          "type_info": "Int8"
+        },
+        {
+          "name": "start_time",
+          "ordinal": 1,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "end_time",
+          "ordinal": 2,
+          "type_info": "Timestamptz"
+        },
+        {
+          "name": "description",
+          "ordinal": 3,
+          "type_info": "Text"
+        },
+        {
+          "name": "apps_used",
+          "ordinal": 4,
+          "type_info": "TextArray"
+        },
+        {
+          "name": "keywords",
+          "ordinal": 5,
+          "type_info": "TextArray"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Left": [
+          "Text"
+        ]
+      }
+    },
+    "query": "\n        SELECT id, start_time, end_time, description, apps_used, keywords\n        FROM activity_summaries\n        WHERE \n            description ILIKE $1 OR\n            $1 = ANY(keywords)\n        ORDER BY start_time DESC\n        "
+  }
+}

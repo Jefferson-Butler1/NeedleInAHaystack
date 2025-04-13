@@ -1,0 +1,3 @@
+# Uncomment when running in offline mode
+# [env]
+# SQLX_OFFLINE = "true"

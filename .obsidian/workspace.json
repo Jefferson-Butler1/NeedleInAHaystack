@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/Ideas.md",
+                "file": "docs/Planiel...Staniel.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Ideas"
+              "title": "Planiel...Staniel"
             }
           }
         ]
@@ -171,19 +171,19 @@
   "active": "102b3fadedfa9c1e",
   "lastOpenFiles": [
     "secondBrainSrc/db/pg_stat_tmp/global.tmp",
-    "secondBrainSrc/db/base/16384/18717",
-    "secondBrainSrc/db/base/16384/18716",
-    "secondBrainSrc/db/base/16384/18715",
-    "secondBrainSrc/db/base/13823/18714",
-    "secondBrainSrc/db/base/13823/18713",
-    "secondBrainSrc/db/base/13823/18712",
-    "secondBrainSrc/db/pg_stat_tmp/db_0.tmp",
-    "secondBrainSrc/db/pg_stat_tmp/db_13823.tmp",
-    "secondBrainSrc/target/debug/incremental/second_brain-2drlz3snb7zf4/s-h6bbxl5x44-1binw32-68kj6ch6e8i9ayrzf6nsju4bu/work-products.bin",
-    "secondBrainSrc/target/debug/incremental/second_brain-2drlz3snb7zf4/s-h6bbxl5x44-1binw32-68kj6ch6e8i9ayrzf6nsju4bu/query-cache.bin",
+    "secondBrainSrc/demo/target/debug/deps/second_brain_demo-ddb8e2dfa7c9e0fa",
+    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/work-products.bin",
+    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/query-cache.bin",
+    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/evlnd9evsgdl6g2idmo6qxqnq.o",
+    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/et0hy3bfi5qp82gn0k90kmmaj.o",
+    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/epap29b1y73oxwjxtt2kb1d3w.o",
+    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/ep56smdh0judfihty3dokbju2.o",
+    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/ehmhrljaxc1cvcbpv749w10w6.o",
+    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/egchzbr47k1bmk4qw1jzq9078.o",
+    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/e9pmvks4y7i3jo5f97hxoue6g.o",
+    "docs/Ideas.md",
     "secondBrainSrc/demo/README.md",
     "docs/second brain idea.md",
-    "docs/Ideas.md",
     "secondBrainSrc/README.md",
     "docs/Planiel...Staniel.md",
     "second brain idea.md",

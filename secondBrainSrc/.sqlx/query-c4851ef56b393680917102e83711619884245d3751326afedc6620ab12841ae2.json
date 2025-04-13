@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO user_events (timestamp, event_type, data, app_name)\n        VALUES ($1, $2, $3, $4)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        {
+          "Custom": {
+            "name": "event_type",
+            "kind": {
+              "Enum": [
+                "keystroke",
+                "mouseclick",
+                "appswitch",
+                "screencapture"
+              ]
+            }
+          }
+        },
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c4851ef56b393680917102e83711619884245d3751326afedc6620ab12841ae2"
+}
