@@ -1,25 +1,17 @@
-[package]
-name = "second_brain"
-version = "0.1.0"
-edition = "2021"
-description = "A second brain application that tracks user activities and provides intelligent recall"
+# Cargo.toml (workspace)
+[workspace]
+members = [
+    "crates/common",
+    "crates/learner",
+    "crates/thinker",
+    "crates/recall",
+]
 
-[features]
-default = []
-mock_db = []
-
-[dependencies]
-tokio = { version = "1.32", features = ["full"] }
-sqlx = { version = "0.7", features = ["runtime-tokio", "tls-rustls", "postgres", "time", "json", "chrono"] }
-rdev = "0.5"
+[workspace.dependencies]
+tokio = { version = "1.29", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-anyhow = "1.0"
-reqwest = { version = "0.11", features = ["json"] }
-fuzzy-matcher = "0.3"
-dotenv = "0.15"
 async-trait = "0.1"
-clap = { version = "4.4", features = ["derive"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }
+reqwest = { version = "0.11", features = ["json"] }
