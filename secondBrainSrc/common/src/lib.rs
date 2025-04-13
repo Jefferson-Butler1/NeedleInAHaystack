@@ -1,0 +1,8 @@
+// common/src/lib.rs
+pub mod db;
+pub mod models;
+pub mod utils;
+
+// Re-export commonly used items
+pub use db::*;
+pub use models::*;

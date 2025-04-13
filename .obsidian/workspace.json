@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/Planiel...Staniel.md",
+                "file": "docs/second brain idea.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Planiel...Staniel"
+              "title": "second brain idea"
             }
           }
         ]
@@ -170,22 +170,22 @@
   },
   "active": "102b3fadedfa9c1e",
   "lastOpenFiles": [
-    "secondBrainSrc/db/pg_stat_tmp/global.tmp",
-    "secondBrainSrc/demo/target/debug/deps/second_brain_demo-ddb8e2dfa7c9e0fa",
-    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/work-products.bin",
-    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/query-cache.bin",
-    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/evlnd9evsgdl6g2idmo6qxqnq.o",
-    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/et0hy3bfi5qp82gn0k90kmmaj.o",
-    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/epap29b1y73oxwjxtt2kb1d3w.o",
-    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/ep56smdh0judfihty3dokbju2.o",
-    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/ehmhrljaxc1cvcbpv749w10w6.o",
-    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/egchzbr47k1bmk4qw1jzq9078.o",
-    "secondBrainSrc/demo/target/debug/incremental/second_brain_demo-1vbwa244oyvry/s-h6do22dvh8-03y1ud4-9r5589iv1zlixfbrev5abx5z8/e9pmvks4y7i3jo5f97hxoue6g.o",
-    "docs/Ideas.md",
+    "secondBrainSrc/thinker/src/main.rs",
+    "secondBrainSrc/thinker/src/event_analyzer.rs",
+    "secondBrainSrc/thinker/src",
+    "secondBrainSrc/thinker",
+    "secondBrainSrc/recall/src/query_engine.rs",
+    "secondBrainSrc/recall/src/main.rs",
+    "secondBrainSrc/recall/src/fuzzy_finder.rs",
+    "secondBrainSrc/recall/src",
+    "secondBrainSrc/recall",
+    "secondBrainSrc/learner/src/main.rs",
+    "secondBrainSrc/learner/src/keylogger.rs",
     "secondBrainSrc/demo/README.md",
-    "docs/second brain idea.md",
     "secondBrainSrc/README.md",
     "docs/Planiel...Staniel.md",
+    "docs/Ideas.md",
+    "docs/second brain idea.md",
     "second brain idea.md",
     "Ideas.md",
     "Planiel...Staniel.md",
