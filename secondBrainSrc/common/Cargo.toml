@@ -1,13 +1,9 @@
-# Cargo.toml (workspace)
-[workspace]
-members = [
-    "common",
-    "learner",
-    "thinker",
-    "recall",
-]
+[package]
+name = "activity-tracker-common"
+version = "0.1.0"
+edition = "2021"
 
-[workspace.dependencies]
+[dependencies]
 tokio = { version = "1.29", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -15,3 +11,5 @@ serde_json = "1.0"
 async-trait = "0.1"
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }
 reqwest = { version = "0.11", features = ["json"] }
+thiserror = "1.0"
+dotenv = "0.15"

@@ -13,7 +13,7 @@ The system consists of three main components:
 
 2. **Thinker** - Processes activity data:
    - Periodically summarizes raw activities
-   - Uses an LLM to create descriptions of user behavior
+   - Uses Ollama (llama3.2:3b) to create descriptions of user behavior
    - Extracts keywords and stores in a searchable database
 
 3. **Recall** - Retrieves and analyzes past activities:
@@ -21,80 +21,116 @@ The system consists of three main components:
    - Enables fuzzy search for finding related activities
    - Creates meta-summaries across time periods
 
+## Project Structure
+
+The project is organized as a Cargo workspace with multiple crates:
+
+```
+second-brain/
+├── Cargo.toml (workspace)
+├── crates/
+│   ├── common/ - Shared code and utilities
+│   │   ├── src/
+│   │   │   ├── db/ - Database interfaces
+│   │   │   ├── llm/ - LLM clients
+│   │   │   ├── models.rs - Shared data models
+│   │   │   └── utils.rs - Utility functions
+│   ├── learner/ - Activity tracking
+│   ├── thinker/ - Processing and analyzing
+│   └── recall/ - Retrieval and querying
+└── docker-compose.yml - Services configuration
+```
+
 ## Prerequisites
 
-For the full version:
 - Rust 1.70+
-- PostgreSQL with TimescaleDB extension
-- Ollama with llama3.2:3b model
-
-For the demo version (no database required):
-- Rust 1.70+
-- Ollama with llama3.2:3b model
+- Docker and Docker Compose
 
 ## Setup
 
-### Installing Ollama
+### Clone the repository
 
-1. Download and install Ollama from [ollama.ai](https://ollama.ai)
-2. Pull the llama3.2 model:
-   ```
-   ollama pull llama3.2:3b
-   ```
+```bash
+git clone https://github.com/yourusername/second-brain.git
+cd second-brain
+```
 
-### Setting up the full version
+### Configure environment
 
-1. Install PostgreSQL and TimescaleDB
-2. Set up the database:
-   ```
-   psql -U postgres -c "CREATE DATABASE second_brain;"
-   psql -U postgres -d second_brain -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
-   ```
-3. Run the database setup script:
-   ```
-   ./db_setup.sh
-   ```
-4. Copy `.env.sample` to `.env` and configure your database connection
+Copy the example environment file and edit as needed:
+
+```bash
+cp .env.sample .env
+```
+
+### Start the services
+
+The system uses Docker Compose to manage:
+- TimescaleDB for time-series data storage
+- Ollama for LLM inference
+
+```bash
+docker-compose up -d
+```
+
+This will start:
+- TimescaleDB on port 5435
+- Ollama on port 11434 with the llama3.2:3b model
 
 ### Building the application
 
-```
+```bash
 cargo build --release
 ```
 
 ## Usage
 
-### Demo Mode (no database required)
-
-The demo mode lets you try the basic functionality without setting up a database:
-
-```bash
-# Start the demo service
-./target/release/second_brain start --demo
-
-# Query in demo mode
-./target/release/second_brain query --demo "What was I working on yesterday?"
-
-# Test the LLM directly
-./target/release/second_brain test-llm "Tell me a short joke"
-
-# Use a different model (if you have it pulled in Ollama)
-./target/release/second_brain test-llm --model "llama3:70b" "Explain quantum computing"
-```
-
-### Full Mode (requires database setup)
-
 Start the service to begin capturing your activities:
 
-```
-./target/release/second_brain start
+```bash
+./target/release/second-brain
 ```
 
-Query your second brain:
+This will launch all three components:
+- The Learner will begin capturing keystrokes and activity
+- The Thinker will process this data every 5 minutes
+- The Recall service will listen on port 8080 for queries
 
+### Querying your Second Brain
+
+You can query your second brain through the TCP interface:
+
+```bash
+echo "What was I working on yesterday?" | nc localhost 8080
 ```
-./target/release/second_brain query "What was I working on last Tuesday?"
-./target/release/second_brain query "Find my research on rust async"
+
+Or for fuzzy search:
+
+```bash
+echo "fuzzy:rust async" | nc localhost 8080
+```
+
+## Development
+
+### Running the components individually
+
+You can run each component separately during development:
+
+```bash
+# Start the learner
+cargo run --package activity-tracker-learner
+
+# Start the thinker
+cargo run --package activity-tracker-thinker
+
+# Start the recall service
+cargo run --package activity-tracker-recall
+```
+
+### Accessing TimescaleDB directly
+
+```bash
+docker-compose exec timescaledb psql -U postgres -d second_brain
 ```
 
 ## License
