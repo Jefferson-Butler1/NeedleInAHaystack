@@ -14,6 +14,7 @@ pub trait SummaryStore {
     async fn search_summaries(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error>>;
 }
 
+#[derive(Clone)]
 pub struct GeneralDbClient {
     //@todo use SQLite for this database to store processed summaries
 }

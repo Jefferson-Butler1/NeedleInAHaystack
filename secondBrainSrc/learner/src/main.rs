@@ -1,4 +1,4 @@
-use activity_tracker_common::{TimescaleClient, EventStore, UserEvent};
+use activity_tracker_common::{EventStore, TimescaleClient, UserEvent};
 use std::error::Error;
 use tokio::time::{interval, Duration};
 
@@ -9,7 +9,8 @@ use keylogger::Keylogger;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     //@todo put in .env variable
-    let client = TimescaleClient::new("postgres://postgres:postgres@localhost:5432/postgres").await?;
+    let client =
+        TimescaleClient::new("postgres://postgres:postgres@localhost:5432/postgres").await?;
 
     let keylogger = Keylogger::new();
 
@@ -21,7 +22,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         interval.tick().await;
 
         if let Some(key_event) = keylogger.poll() {
-            db_client.store_event(key_event).await?;
+            client.store_event(key_event).await?;
         }
     }
 }

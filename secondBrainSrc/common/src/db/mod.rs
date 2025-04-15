@@ -4,6 +4,9 @@ use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres};
 use std::error::Error;
 
+mod general_db;
+pub use general_db::*;
+
 #[async_trait]
 pub trait EventStore {
     async fn store_event(&self, event: UserEvent) -> Result<(), Box<dyn Error>>;
@@ -11,7 +14,7 @@ pub trait EventStore {
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    )-> Result<Vec<UserEvent>, Box<dyn Error>>;
+    ) -> Result<Vec<UserEvent>, Box<dyn Error>>;
 }
 
 pub struct TimescaleClient {
@@ -19,11 +22,13 @@ pub struct TimescaleClient {
 }
 
 impl TimescaleClient {
-    pub async fn new(connection_string: &str) -> Result<Self, Box<dyn Error>>{
-        let pool = sqlx::postgres::PGPoolOptions::new()
+    pub async fn new(connection_string: &str) -> Result<Self, Box<dyn Error>> {
+        println!("Connecting to database: {}", connection_string);
+        let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(5)
             .connect(connection_string)
             .await?;
+        Ok(Self { pool })
     }
 }
 
@@ -38,11 +43,13 @@ impl EventStore for TimescaleClient {
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    )-> Result<Vec<UserEvent>, Box<dyn Error>> {
+    ) -> Result<Vec<UserEvent>, Box<dyn Error>> {
         //@todo implement the actual sql to store this
         // note this will just be a get * where inside of timeframe
-        println!("Getting events in timeframe(IMPLEMENT THIS): {:?} - {:?}", start, end);
+        println!(
+            "Getting events in timeframe(IMPLEMENT THIS): {:?} - {:?}",
+            start, end
+        );
         Ok(vec![])
     }
 }
-

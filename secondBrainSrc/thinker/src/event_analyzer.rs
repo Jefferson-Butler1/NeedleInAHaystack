@@ -1,17 +1,13 @@
-use activity_tracker_common::{UserEvent, ActivitySummary};
+use activity_tracker_common::{ActivitySummary, OllamaClient, UserEvent};
 use chrono::{DateTime, Utc};
 use std::error::Error;
 
-// @todo will be using lama instead of llm_client
-// also update key in thinker/main.rs
-use crate::llm_client::LLMClient;
-
 pub struct EventAnalyzer {
-    llm_client: LLMClient,
+    llm_client: OllamaClient,
 }
 
 impl EventAnalyzer {
-    pub fn new(llm_client: LLMClient) -> Self {
+    pub fn new(llm_client: OllamaClient) -> Self {
         Self { llm_client }
     }
 
@@ -21,7 +17,8 @@ impl EventAnalyzer {
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
     ) -> Result<ActivitySummary, Box<dyn Error>> {
-        let events_text = events.iter()
+        let events_text = events
+            .iter()
             .map(|event| format!("{:?}", event))
             .collect::<Vec<_>>()
             .join("\n");

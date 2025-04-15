@@ -1,9 +1,9 @@
-use activity_tracker_common::{GeneralDbClient, SummaryStore, ActivitySummary};
+use activity_tracker_common::{ActivitySummary, GeneralDbClient, SummaryStore};
 use std::error::Error;
 
 #[derive(Clone)]
 pub struct FuzzyFinder {
-    pub db_client: GeneralDbClient
+    pub db_client: GeneralDbClient,
 }
 
 impl FuzzyFinder {

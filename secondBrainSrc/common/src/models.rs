@@ -1,5 +1,12 @@
-use chrono::{DateTime, Utc}
-use serde::{Deserialize, Serialize}
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppContext {
+    pub app_name: String,
+    pub window_title: String,
+    pub url: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserEvent {
@@ -11,14 +18,14 @@ pub struct UserEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventType {
-    Keystroke, 
+    Keystroke,
     // MouseClick,
     // AppSwitch
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventData {
-    Keystroke {key: String, modifiers: Vec<String>}
+    Keystroke { key: String, modifiers: Vec<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,5 +34,5 @@ pub struct ActivitySummary {
     pub end_time: DateTime<Utc>,
     pub description: String,
     pub events: Vec<UserEvent>,
-    pub tags: Vec<String>
+    pub tags: Vec<String>,
 }

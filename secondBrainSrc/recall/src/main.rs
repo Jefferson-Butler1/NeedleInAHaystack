@@ -1,13 +1,13 @@
-use activity_tracker_common:: {GeneralDbClient, SummaryStore, ActivitySummary};
+use activity_tracker_common::{ActivitySummary, GeneralDbClient, SummaryStore};
 use std::error::Error;
-use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
+mod fuzzy_finder;
 mod query_engine;
-mod fuzzy_finder:
 
-use query_engine::QueryEngine;
 use fuzzy_finder::FuzzyFinder;
+use query_engine::QueryEngine;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tokio::spawn(async move {
             let mut buffer = [0; 1024];
 
-            match socke.read(&mut buffer).await {
+            match socket.read(&mut buffer).await {
                 Ok(n) => {
                     let query = String::from_utf8_lossy(&buffer[..n]).to_string();
 
@@ -60,7 +60,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn format_summaries(summaries: Vec<ActivitySummary>) -> String {
-    summaries.iter()
+    summaries
+        .iter()
         .map(|s| {
             format!(
                 "Time: {} to {} \nDescription: {}\nTags: {}\nEvents: {}\n",

@@ -42,18 +42,16 @@ struct GenerateResponse {
 }
 
 impl OllamaClient {
-    pub async fn new(model: &str) -> Result<Self, Box<dyn Error>> { 
-        let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()?;
+    pub async fn new(model: &str) -> Result<Self, Box<dyn Error>> {
+        let client = Client::builder().timeout(Duration::from_secs(60)).build()?;
 
-        let base_url = std::env::var("OLLAMA_HOST")
-            .unwrap_or_else(|_| "http://localhost:11434".to_string());
-        let ollama = Self{
+        let base_url =
+            std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
+        let ollama = Self {
             client,
             model: model.to_string(),
             base_url,
-        }
+        };
 
         ollama.check_model().await?;
 
@@ -63,14 +61,19 @@ impl OllamaClient {
     async fn check_model(&self) -> Result<(), Box<dyn Error>> {
         let url = format!("{}/api/show", self.base_url);
 
-        let response = self.client()
+        let response = self
+            .client
             .post(&url)
             .json(&serde_json::json!({"name": self.model}))
             .send()
             .await?;
 
         if !response.status().is_success() {
-            return Err(format!("Model '{}' not found in Ollama. Please check your Ollama installation.", self.model, self.model).into());
+            return Err(format!(
+                "Model '{}' not found in Ollama. Please check your Ollama installation.",
+                self.model
+            )
+            .into());
         }
 
         Ok(())
@@ -94,7 +97,8 @@ impl LlmClient for OllamaClient {
             }),
         };
 
-        let response = self.client()
+        let response = self
+            .client
             .post(&url)
             .json(&request)
             .send()
