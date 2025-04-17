@@ -43,7 +43,7 @@ struct GenerateResponse {
 
 impl OllamaClient {
     pub async fn new(model: &str) -> Result<Self, Box<dyn Error>> {
-        let client = Client::builder().timeout(Duration::from_secs(60)).build()?;
+        let client = Client::builder().timeout(Duration::from_secs(180)).build()?;
 
         let base_url =
             std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
@@ -84,6 +84,7 @@ impl OllamaClient {
 impl LlmClient for OllamaClient {
     async fn generate_text(&self, prompt: &str) -> Result<String, Box<dyn Error>> {
         let url = format!("{}/api/generate", self.base_url);
+        // println!("{}/api/generate", self.base_url);
 
         let request = GenerateRequest {
             model: self.model.clone(),
