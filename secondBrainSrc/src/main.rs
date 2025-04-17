@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Start learner component
     let learner = Command::new("cargo")
-        .args(&["run", "--package", "activity-tracker-learner"])
+        .args(["run", "--package", "activity-tracker-learner"])
         .spawn()?;
     processes.push(("Learner", learner));
 
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Start thinker component
     let thinker = Command::new("cargo")
-        .args(&["run", "--package", "activity-tracker-thinker"])
+        .args(["run", "--package", "activity-tracker-thinker"])
         .spawn()?;
     processes.push(("Thinker", thinker));
 
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Start recall component
     let recall = Command::new("cargo")
-        .args(&["run", "--package", "activity-tracker-recall"])
+        .args(["run", "--package", "activity-tracker-recall"])
         .spawn()?;
     processes.push(("Recall", recall));
 

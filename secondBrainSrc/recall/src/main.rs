@@ -1,7 +1,4 @@
-use activity_tracker_common::{
-    db::GeneralDbClient,
-    ActivitySummary,
-};
+use activity_tracker_common::{db::GeneralDbClient, ActivitySummary};
 use dotenv::dotenv;
 use std::env;
 use std::error::Error;
@@ -31,8 +28,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let fuzzy_finder = FuzzyFinder::new(db_client);
 
     // @todo setup a simple TCP server to handle recall requests
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    println!("Recall thread started. Listening on 127.0.0.1:8080");
+    let listener = TcpListener::bind("127.0.0.1:8081").await?;
+    println!("Recall thread started. Listening on 127.0.0.1:8081");
 
     loop {
         let (socket, _) = listener.accept().await?;
