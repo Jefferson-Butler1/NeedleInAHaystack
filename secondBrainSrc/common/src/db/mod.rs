@@ -1,4 +1,4 @@
-use crate::models::{ActivitySummary, AppContext, UserEvent};
+use crate::models::{AppContext, UserEvent};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres, Row};
@@ -39,6 +39,7 @@ pub trait TimescaleSummaryStore {
     ) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>, String, Vec<String>)>, Box<dyn Error>>;
 }
 
+#[derive(Clone)]
 pub struct TimescaleClient {
     pool: Pool<Postgres>,
 }
@@ -111,11 +112,18 @@ impl TimescaleClient {
         .execute(&self.pool)
         .await?;
         
-        // Create indices
+        // Create indices - one at a time (PostgreSQL doesn't allow multiple commands in a prepared statement)
         sqlx::query(
             r#"
-            CREATE INDEX IF NOT EXISTS user_events_timestamp_idx ON user_events (timestamp);
-            CREATE INDEX IF NOT EXISTS user_summaries_timerange_idx ON user_summaries (start_time, end_time);
+            CREATE INDEX IF NOT EXISTS user_events_timestamp_idx ON user_events (timestamp)
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+        
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS user_summaries_timerange_idx ON user_summaries (start_time, end_time)
             "#
         )
         .execute(&self.pool)

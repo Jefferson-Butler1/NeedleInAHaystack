@@ -115,7 +115,6 @@ fn format_summaries(summaries: Vec<ActivitySummary>) -> String {
     summaries
         .iter()
         .map(|s| {
-            let event_count = s.events.len();
             let time_fmt =
                 |dt: chrono::DateTime<chrono::Utc>| -> String { dt.format("%H:%M:%S").to_string() };
 

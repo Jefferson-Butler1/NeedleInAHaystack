@@ -2,7 +2,7 @@ use activity_tracker_common::{
     db::{GeneralDbClient, SummaryStore, TimescaleClient, TimescaleSummaryStore},
     ActivitySummary,
 };
-use chrono::{DateTime, Duration, NaiveTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use std::error::Error;
 
 #[derive(Clone)]
