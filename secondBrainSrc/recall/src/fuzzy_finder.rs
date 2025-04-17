@@ -14,8 +14,11 @@ impl FuzzyFinder {
         Self { db_client }
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error>> {
+    pub async fn search(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error + Send + Sync>> {
         // @todo this would implement fuzzy finding logic
-        self.db_client.search_summaries(query).await
+        match self.db_client.search_summaries(query).await {
+            Ok(results) => Ok(results),
+            Err(e) => Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn Error + Send + Sync>),
+        }
     }
 }

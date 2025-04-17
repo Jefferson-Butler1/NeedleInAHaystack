@@ -1,10 +1,14 @@
-use activity_tracker_common::{db::GeneralDbClient, db::TimescaleClient, ActivitySummary};
+use activity_tracker_common::{
+    db::GeneralDbClient, db::TimescaleClient, llm::create_default_client, ActivitySummary,
+};
 use dotenv::dotenv;
 use std::env;
 use std::error::Error;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-use tracing::{error, info, Level};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
+use tracing::{error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 mod fuzzy_finder;
@@ -38,9 +42,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("Connecting to events database (TimescaleDB)...");
     let timescale_client = TimescaleClient::new(&timescale_db_url).await?;
 
+    // Initialize LLM client
+    info!("Initializing LLM client...");
+    let llm_client = create_default_client().await?;
+    info!("LLM client initialized");
+
     // Initialize query engine and fuzzy finder
-    let query_engine = QueryEngine::new(sqlite_client.clone(), timescale_client.clone());
-    let fuzzy_finder = FuzzyFinder::new(sqlite_client);
+    info!("Setting up query engine...");
+    let query_engine = Arc::new(QueryEngine::new(
+        sqlite_client.clone(),
+        timescale_client.clone(),
+        Arc::new(llm_client),
+    ));
+
+    let fuzzy_finder = Arc::new(Mutex::new(FuzzyFinder::new(sqlite_client)));
 
     // Setup TCP server for handling recall requests
     let port = env::var("RECALL_PORT").unwrap_or_else(|_| "8081".to_string());
@@ -51,8 +66,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         match listener.accept().await {
             Ok((socket, _)) => {
-                let query_engine = query_engine.clone();
-                let fuzzy_finder = fuzzy_finder.clone();
+                let query_engine = Arc::clone(&query_engine);
+                let fuzzy_finder = Arc::clone(&fuzzy_finder);
 
                 // Process each client request in a separate task
                 tokio::spawn(async move {
@@ -70,10 +85,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 // Handle client connections
 async fn handle_client(
-    mut socket: tokio::net::TcpStream,
-    query_engine: QueryEngine,
-    fuzzy_finder: FuzzyFinder,
-) -> Result<(), Box<dyn Error>> {
+    mut socket: TcpStream,
+    query_engine: Arc<QueryEngine>,
+    fuzzy_finder: Arc<Mutex<FuzzyFinder>>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut buffer = [0; 8192]; // Increased buffer size to 8KB
 
     // Read from the socket
@@ -87,26 +102,28 @@ async fn handle_client(
     let query = String::from_utf8_lossy(&buffer[..n]).to_string();
     info!("Received query: {}", query.trim());
 
-    // Check if this is an HTTP request
-    let response = if query.starts_with("GET")
-        || query.starts_with("POST")
-        || query.starts_with("HTTP")
-    {
-        // Send a simple HTTP response
-        format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nSecond Brain Recall Service\r\n\r\nUsage:\r\n- Send plain text queries to search your activity\r\n- Start with 'Fuzzy:' for fuzzy searching\r\n- Try queries like 'today', 'yesterday', 'morning', 'evening'")
-    } else if query.starts_with("Fuzzy:") {
-        let search_term = &query[6..];
-        match fuzzy_finder.search(search_term).await {
-            Ok(summaries) => format_summaries(summaries),
-            Err(e) => format!("Error in fuzzy search: {}", e),
+    // Request for an LLM-summarized response
+    let user_query = &query[10..]; // Remove the "Summarize:" prefix
+
+    // First get the matching activities
+    let response = match query_engine.process_query(user_query).await {
+        Ok(summaries) if !summaries.is_empty() => {
+            // Then generate an LLM summary
+            println!(
+                "query: {}\n summaries: {}",
+                user_query,
+                format_summaries(&summaries)
+            );
+            match query_engine
+                .summarize_summaries(user_query, &summaries)
+                .await
+            {
+                Ok(summary) => format!("Summary: {}", summary),
+                Err(e) => format!("Error generating summary: {}", e),
+            }
         }
-    } else {
-        // Extract actual query if there might be HTTP headers
-        let actual_query = query.lines().next().unwrap_or(&query);
-        match query_engine.process_query(actual_query).await {
-            Ok(summaries) => format_summaries(summaries),
-            Err(e) => format!("Error in query: {}", e),
-        }
+        Ok(_) => "No activities found for the given query.".to_string(),
+        Err(e) => format!("Error retrieving activities: {}", e),
     };
 
     // Send response back to client
@@ -115,7 +132,7 @@ async fn handle_client(
     Ok(())
 }
 
-fn format_summaries(summaries: Vec<ActivitySummary>) -> String {
+fn format_summaries(summaries: &[ActivitySummary]) -> String {
     if summaries.is_empty() {
         return "No matching summaries found.".to_string();
     }
@@ -137,3 +154,4 @@ fn format_summaries(summaries: Vec<ActivitySummary>) -> String {
         .collect::<Vec<_>>()
         .join("\n---------------\n")
 }
+
