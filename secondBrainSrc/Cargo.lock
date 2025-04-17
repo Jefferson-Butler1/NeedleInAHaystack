@@ -23,6 +23,7 @@ dependencies = [
  "activity-tracker-common",
  "async-trait",
  "chrono",
+ "dotenv",
  "serde",
  "serde_json",
  "sqlx",

@@ -10,7 +10,7 @@ pub struct AppContext {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserEvent {
-    pub timestam: DateTime<Utc>,
+    pub timestamp: DateTime<Utc>,
     pub event: String,
     pub data: String,
     pub app_context: AppContext,
