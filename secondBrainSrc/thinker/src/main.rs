@@ -1,5 +1,5 @@
 use activity_tracker_common::{
-    db::{EventStore, GeneralDbClient, SummaryStore, TimescaleClient},
+    db::{EventStore, TimescaleClient, TimescaleSummaryStore},
     llm::create_default_client,
 };
 use chrono::{Duration, Utc};
@@ -7,12 +7,21 @@ use dotenv::dotenv;
 use std::error::Error;
 use std::env;
 use tokio::time::{interval, Duration as TokioDuration};
+use tracing::{info, error, warn, Level};
+use tracing_subscriber::FmtSubscriber;
 
 mod event_analyzer;
 use event_analyzer::EventAnalyzer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Initialize tracing
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to set tracing subscriber");
+
     // Load environment variables
     dotenv().ok();
     
@@ -20,33 +29,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let events_db_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5435/second_brain".to_string());
     
-    let summary_db_url = env::var("SUMMARY_DB_URL")
-        .unwrap_or_else(|_| "sqlite:./data/summaries.db".to_string());
-    
-    // Connect to databases
-    println!("🔌 Connecting to event database...");
-    let events_db = TimescaleClient::new(&events_db_url).await?;
-    
-    println!("🔌 Connecting to summary database...");
-    let summary_db = GeneralDbClient::new(&summary_db_url).await?;
+    // Connect to database
+    info!("Connecting to database...");
+    let db_client = TimescaleClient::new(&events_db_url).await?;
     
     // Initialize LLM client
-    println!("🧠 Initializing LLM client...");
+    info!("Initializing LLM client...");
     let llm_client = create_default_client().await?;
-    println!("✅ LLM client initialized");
     
     // Create analyzer
     let analyzer = EventAnalyzer::new(llm_client);
     
-    // Setup processing interval (5 minutes)
-    let interval_secs = env::var("THINKER_INTERVAL_SECS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(300); // Default to 5 minutes
+    // Setup processing interval (1 minute)
+    let interval_secs = 60; // Process events every minute
     
     let mut interval = interval(TokioDuration::from_secs(interval_secs));
     
-    println!("🚀 Thinker thread started. Processing at {} second intervals...", interval_secs);
+    info!("Thinker thread started. Processing every 60 seconds.");
     
     loop {
         interval.tick().await;
@@ -54,23 +53,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let end_time = Utc::now();
         let start_time = end_time - Duration::minutes(5);
         
-        println!("🔍 Analyzing events from {} to {}", start_time, end_time);
+        info!("Analyzing events from {} to {}", start_time, end_time);
         
-        let events = events_db
-            .get_events_in_timeframe(start_time, end_time)
-            .await?;
-        
-        if !events.is_empty() {
-            println!("📊 Found {} events to analyze", events.len());
-            
-            let summary = analyzer
-                .analyze_events(events, start_time, end_time)
-                .await?;
-                
-            println!("💾 Storing summary: {}", summary.description);
-            summary_db.store_summary(&summary).await?;
-        } else {
-            println!("⚠️ No events found in the specified time period");
+        // Get events from the last 5 minutes
+        match db_client.get_events_in_timeframe(start_time, end_time).await {
+            Ok(events) => {
+                if !events.is_empty() {
+                    info!("Found {} events to analyze", events.len());
+                    
+                    // Analyze events
+                    match analyzer.analyze_events(events, start_time, end_time).await {
+                        Ok((description, tags, keystrokes)) => {
+                            // Store summary in timescale db
+                            match db_client.store_timescale_summary(
+                                start_time,
+                                end_time,
+                                description.clone(),
+                                tags.clone(),
+                                keystrokes
+                            ).await {
+                                Ok(_) => info!("Successfully stored summary"),
+                                Err(e) => error!("Failed to store summary: {}", e),
+                            }
+                        },
+                        Err(e) => error!("Failed to analyze events: {}", e),
+                    }
+                } else {
+                    warn!("No events found in the specified time period");
+                }
+            },
+            Err(e) => error!("Failed to retrieve events: {}", e),
         }
     }
 }

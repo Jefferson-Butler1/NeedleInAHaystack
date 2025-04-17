@@ -11,5 +11,7 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 sqlx = { workspace = true }
 dotenv = "0.15"
+tracing = "0.1"
+tracing-subscriber = "0.3"
 # local dependencies
 activity-tracker-common = { path = "../common" }

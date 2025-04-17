@@ -1,9 +1,11 @@
-use activity_tracker_common::{db::GeneralDbClient, ActivitySummary};
+use activity_tracker_common::{db::GeneralDbClient, db::TimescaleClient, ActivitySummary};
 use dotenv::dotenv;
 use std::env;
 use std::error::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tracing::{error, info, Level};
+use tracing_subscriber::FmtSubscriber;
 
 mod fuzzy_finder;
 mod query_engine;
@@ -13,60 +15,79 @@ use query_engine::QueryEngine;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Initialize tracing
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
+
     // Load environment variables
     dotenv().ok();
 
-    // Get the summary database URL from environment
+    // Get the database URLs from environment
     let summary_db_url =
         env::var("SUMMARY_DB_URL").unwrap_or_else(|_| "sqlite:./data/summaries.db".to_string());
 
-    println!("🔌 Connecting to summary database...");
-    let db_client = GeneralDbClient::new(&summary_db_url).await?;
-    println!("✅ Connected to summary database");
+    let timescale_db_url = env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5435/second_brain".to_string());
 
-    let query_engine = QueryEngine::new(db_client.clone());
-    let fuzzy_finder = FuzzyFinder::new(db_client);
+    // Connect to databases
+    info!("Connecting to summary database (SQLite)...");
+    let sqlite_client = GeneralDbClient::new(&summary_db_url).await?;
 
-    // @todo setup a simple TCP server to handle recall requests
-    let listener = TcpListener::bind("127.0.0.1:8081").await?;
-    println!("Recall thread started. Listening on 127.0.0.1:8081");
+    info!("Connecting to events database (TimescaleDB)...");
+    let timescale_client = TimescaleClient::new(&timescale_db_url).await?;
+
+    // Initialize query engine and fuzzy finder
+    let query_engine = QueryEngine::new(sqlite_client.clone(), timescale_client.clone());
+    let fuzzy_finder = FuzzyFinder::new(sqlite_client);
+
+    // Setup TCP server for handling recall requests
+    let port = env::var("RECALL_PORT").unwrap_or_else(|_| "8081".to_string());
+    let addr = format!("127.0.0.1:{}", port);
+    let listener = TcpListener::bind(&addr).await?;
+    info!("Recall thread started. Listening on {}", addr);
 
     loop {
-        let (socket, _) = listener.accept().await?;
+        match listener.accept().await {
+            Ok((socket, _)) => {
+                let query_engine = query_engine.clone();
+                let fuzzy_finder = fuzzy_finder.clone();
 
-        let query_engine = query_engine.clone();
-        let fuzzy_finder = fuzzy_finder.clone();
-
-        // Process a client request in a new task
-        tokio::spawn(async move {
-            handle_client(socket, query_engine, fuzzy_finder).await;
-        });
-
-        println!("Recall thread is running...");
+                // Process each client request in a separate task
+                tokio::spawn(async move {
+                    if let Err(e) = handle_client(socket, query_engine, fuzzy_finder).await {
+                        error!("Error handling client: {}", e);
+                    }
+                });
+            }
+            Err(e) => {
+                error!("Failed to accept connection: {}", e);
+            }
+        }
     }
 }
 
-// Separate function to handle client connections
+// Handle client connections
 async fn handle_client(
     mut socket: tokio::net::TcpStream,
     query_engine: QueryEngine,
     fuzzy_finder: FuzzyFinder,
-) {
+) -> Result<(), Box<dyn Error>> {
     let mut buffer = [0; 1024];
 
     // Read from the socket
-    let n = match socket.read(&mut buffer).await {
-        Ok(n) => n,
-        Err(e) => {
-            println!("Error reading from socket: {}", e);
-            return;
-        }
-    };
+    let n = socket.read(&mut buffer).await?;
+
+    if n == 0 {
+        return Ok(());
+    }
 
     // Convert bytes to string
     let query = String::from_utf8_lossy(&buffer[..n]).to_string();
+    info!("Received query: {}", query.trim());
 
-    // Process the query and immediately convert to a response string
+    // Process the query
     let response = if query.starts_with("Fuzzy:") {
         let search_term = &query[6..];
         match fuzzy_finder.search(search_term).await {
@@ -80,27 +101,33 @@ async fn handle_client(
         }
     };
 
-    // No need to handle this error since we're about to close the connection anyway
-    let _ = socket.write_all(response.as_bytes()).await;
+    // Send response back to client
+    socket.write_all(response.as_bytes()).await?;
+
+    Ok(())
 }
 
 fn format_summaries(summaries: Vec<ActivitySummary>) -> String {
-    println!("Found {} summaries", summaries.len());
-    println!("Summaries: {:?}", summaries);
+    if summaries.is_empty() {
+        return "No matching summaries found.".to_string();
+    }
+
     summaries
         .iter()
         .map(|s| {
             let event_count = s.events.len();
+            let time_fmt =
+                |dt: chrono::DateTime<chrono::Utc>| -> String { dt.format("%H:%M:%S").to_string() };
 
             format!(
-                "Time: {} to {} \nDescription: {}\nTags: {}\nEvent count: {}\n",
-                s.start_time,
-                s.end_time,
+                "Time: {} to {}\nDescription: {}\nTags: {}\n",
+                time_fmt(s.start_time),
+                time_fmt(s.end_time),
                 s.description,
-                s.tags.join(", "),
-                event_count
+                s.tags.join(", ")
             )
         })
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n---------------\n")
 }
+

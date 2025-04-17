@@ -1,4 +1,4 @@
-use crate::models::{AppContext, UserEvent};
+use crate::models::{ActivitySummary, AppContext, UserEvent};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres, Row};
@@ -15,6 +15,28 @@ pub trait EventStore {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<Vec<UserEvent>, Box<dyn Error>>;
+}
+
+#[async_trait]
+pub trait TimescaleSummaryStore {
+    async fn store_timescale_summary(
+        &self, 
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        description: String,
+        tags: Vec<String>,
+        keystrokes: String,
+    ) -> Result<(), Box<dyn Error>>;
+    
+    async fn get_timescale_summaries_for_day(
+        &self,
+        day: DateTime<Utc>,
+    ) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>, String, Vec<String>)>, Box<dyn Error>>;
+    
+    async fn search_timescale_summaries(
+        &self,
+        query: &str,
+    ) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>, String, Vec<String>)>, Box<dyn Error>>;
 }
 
 pub struct TimescaleClient {
@@ -72,10 +94,28 @@ impl TimescaleClient {
         .execute(&self.pool)
         .await?;
         
-        // Create an index on timestamp separately
+        // Create user_summaries table for timestamped summaries
         sqlx::query(
             r#"
-            CREATE INDEX IF NOT EXISTS user_events_timestamp_idx ON user_events (timestamp)
+            CREATE TABLE IF NOT EXISTS user_summaries (
+                id SERIAL PRIMARY KEY,
+                start_time TIMESTAMPTZ NOT NULL,
+                end_time TIMESTAMPTZ NOT NULL,
+                description TEXT NOT NULL,
+                tags TEXT[] NOT NULL,
+                keystrokes TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+        
+        // Create indices
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS user_events_timestamp_idx ON user_events (timestamp);
+            CREATE INDEX IF NOT EXISTS user_summaries_timerange_idx ON user_summaries (start_time, end_time);
             "#
         )
         .execute(&self.pool)
@@ -109,12 +149,13 @@ impl EventStore for TimescaleClient {
         
         Ok(())
     }
+    
     async fn get_events_in_timeframe(
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<Vec<UserEvent>, Box<dyn Error>> {
-        // Query events within the timeframe using regular query to avoid compile-time checks
+        // Query events within the timeframe
         let rows = sqlx::query(
             r#"
             SELECT timestamp, event_type as "event_type!", event_data as "event_data!", 
@@ -153,5 +194,112 @@ impl EventStore for TimescaleClient {
         }
 
         Ok(events)
+    }
+}
+
+#[async_trait]
+impl TimescaleSummaryStore for TimescaleClient {
+    async fn store_timescale_summary(
+        &self,
+        start_time: DateTime<Utc>,
+        end_time: DateTime<Utc>,
+        description: String,
+        tags: Vec<String>,
+        keystrokes: String,
+    ) -> Result<(), Box<dyn Error>> {
+        // Ensure tables exist
+        self.ensure_tables_exist().await?;
+        
+        // Insert the summary into the database
+        sqlx::query(
+            r#"
+            INSERT INTO user_summaries (start_time, end_time, description, tags, keystrokes)
+            VALUES ($1, $2, $3, $4, $5)
+            "#
+        )
+        .bind(start_time)
+        .bind(end_time)
+        .bind(&description)
+        .bind(&tags)
+        .bind(&keystrokes)
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    async fn get_timescale_summaries_for_day(
+        &self,
+        day: DateTime<Utc>,
+    ) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>, String, Vec<String>)>, Box<dyn Error>> {
+        // Calculate day start and end
+        let day_start = day.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+        let day_end = day.date_naive().and_hms_opt(23, 59, 59).unwrap().and_utc();
+        
+        // Query summaries for the day
+        let rows = sqlx::query(
+            r#"
+            SELECT start_time, end_time, description, tags
+            FROM user_summaries
+            WHERE 
+                (start_time BETWEEN $1 AND $2) OR
+                (end_time BETWEEN $1 AND $2) OR
+                (start_time <= $1 AND end_time >= $2)
+            ORDER BY start_time ASC
+            "#
+        )
+        .bind(day_start)
+        .bind(day_end)
+        .fetch_all(&self.pool)
+        .await?;
+        
+        // Convert rows to summary tuples
+        let mut summaries = Vec::with_capacity(rows.len());
+        
+        for row in rows {
+            let start_time: DateTime<Utc> = row.try_get("start_time")?;
+            let end_time: DateTime<Utc> = row.try_get("end_time")?;
+            let description: String = row.try_get("description")?;
+            let tags: Vec<String> = row.try_get("tags")?;
+            
+            summaries.push((start_time, end_time, description, tags));
+        }
+        
+        Ok(summaries)
+    }
+    
+    async fn search_timescale_summaries(
+        &self,
+        query: &str,
+    ) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>, String, Vec<String>)>, Box<dyn Error>> {
+        // Query summaries that match the search term in description or tags
+        let rows = sqlx::query(
+            r#"
+            SELECT start_time, end_time, description, tags
+            FROM user_summaries
+            WHERE 
+                description ILIKE $1 OR
+                $1 = ANY(tags)
+            ORDER BY start_time DESC
+            LIMIT 50
+            "#
+        )
+        .bind(format!("%{}%", query))
+        .fetch_all(&self.pool)
+        .await?;
+        
+        // Convert rows to summary tuples
+        let mut summaries = Vec::with_capacity(rows.len());
+        
+        for row in rows {
+            let start_time: DateTime<Utc> = row.try_get("start_time")?;
+            let end_time: DateTime<Utc> = row.try_get("end_time")?;
+            let description: String = row.try_get("description")?;
+            let tags: Vec<String> = row.try_get("tags")?;
+            
+            summaries.push((start_time, end_time, description, tags));
+        }
+        
+        Ok(summaries)
     }
 }
