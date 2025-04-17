@@ -85,6 +85,8 @@ async fn handle_client(
 }
 
 fn format_summaries(summaries: Vec<ActivitySummary>) -> String {
+    println!("Found {} summaries", summaries.len());
+    println!("Summaries: {:?}", summaries);
     summaries
         .iter()
         .map(|s| {

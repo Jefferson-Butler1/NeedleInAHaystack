@@ -29,13 +29,17 @@ impl<T: LlmClient> EventAnalyzer<T> {
             events to figure out what might be going on. For example, if there 
             is a :wq, the user is likely trying to exit vim. A series of bash 
             commands would suggest a terminal session.\n Describe
-            what the user was doing during this time period:\n\n{}\n\n",
+            what the user was doing during this time period. Do not generate 
+            code to do this, simply take account of the data given and give a summary of it \n\n{}\n\n",
             start_time, end_time, events_text
         );
 
         let description = self.llm_client.generate_text(&prompt).await?;
 
+        println!("Generated description: {}", description);
+
         let tags = self.extract_tags(&description).await?;
+        println!("Extracted tags: {:?}", tags);
 
         Ok(ActivitySummary {
             start_time,

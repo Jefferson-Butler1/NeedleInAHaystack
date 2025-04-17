@@ -214,10 +214,6 @@ impl SummaryStore for GeneralDbClient {
         )
         .bind(start)
         .bind(end)
-        .bind(start)
-        .bind(end)
-        .bind(start)
-        .bind(end)
         .fetch_all(&self.pool)
         .await?;
 
