@@ -1,0 +1,28 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+warning: fields `model`, `created_at`, and `done` are never read
+  --> common/src/llm/ollama.rs:38:5
+   |
+37 | struct GenerateResponse {
+   |        ---------------- fields in this struct
+38 |     model: String,
+   |     ^^^^^
+39 |     created_at: String,
+   |     ^^^^^^^^^^
+40 |     response: String,
+41 |     done: bool,
+   |     ^^^^
+   |
+   = note: `GenerateResponse` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: `activity-tracker-common` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running `target/debug/activity-tracker-thinker`
+🔌 Connecting to event database...
+Connecting to database: postgres://postgres:postgres@localhost:5435/second_brain
+🔌 Connecting to summary database...
+Connecting to SQLite database: sqlite:./data/summaries.db
+Error: Database(SqliteError { code: 14, message: "unable to open database file" })

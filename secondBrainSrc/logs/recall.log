@@ -1,0 +1,45 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+warning: fields `model`, `created_at`, and `done` are never read
+  --> common/src/llm/ollama.rs:38:5
+   |
+37 | struct GenerateResponse {
+   |        ---------------- fields in this struct
+38 |     model: String,
+   |     ^^^^^
+39 |     created_at: String,
+   |     ^^^^^^^^^^
+40 |     response: String,
+41 |     done: bool,
+   |     ^^^^
+   |
+   = note: `GenerateResponse` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: `activity-tracker-common` (lib) generated 1 warning
+warning: unused import: `SummaryStore`
+ --> recall/src/main.rs:2:27
+  |
+2 |     db::{GeneralDbClient, SummaryStore},
+  |                           ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: variable does not need to be mutable
+  --> recall/src/main.rs:38:14
+   |
+38 |         let (mut socket, _) = listener.accept().await?;
+   |              ----^^^^^^
+   |              |
+   |              help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` on by default
+
+warning: `activity-tracker-recall` (bin "activity-tracker-recall") generated 2 warnings (run `cargo fix --bin "activity-tracker-recall"` to apply 2 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/activity-tracker-recall`
+🔌 Connecting to summary database...
+Connecting to SQLite database: sqlite:./data/summaries.db
+Error: Database(SqliteError { code: 14, message: "unable to open database file" })

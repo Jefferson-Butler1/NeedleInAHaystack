@@ -22,3 +22,9 @@ services:
 volumes:
   timescale_data:
     name: second-brain-timescale-data
+  sqlite_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/data

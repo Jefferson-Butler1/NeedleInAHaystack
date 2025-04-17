@@ -27,15 +27,65 @@ impl GeneralDbClient {
         if connection_string.starts_with("sqlite:") {
             let path = connection_string.trim_start_matches("sqlite:");
             if path != ":memory:" && !path.is_empty() {
+                println!("Using SQLite database at path: {}", path);
+                
                 let db_path = Path::new(path);
-                if let Some(parent) = db_path.parent() {
-                    std::fs::create_dir_all(parent)?;
+                
+                // Check if the database file already exists
+                if !db_path.exists() {
+                    println!("Database file doesn't exist yet, will be created");
+                    
+                    // Ensure parent directory exists
+                    if let Some(parent) = db_path.parent() {
+                        if !parent.exists() {
+                            println!("Creating parent directory: {:?}", parent);
+                            std::fs::create_dir_all(parent)?;
+                        }
+                    }
+                } else {
+                    // Check if file is writable
+                    if std::fs::metadata(db_path)?.permissions().readonly() {
+                        return Err(format!("Database file is read-only: {}", path).into());
+                    }
                 }
             }
         }
 
         println!("Connecting to SQLite database: {}", connection_string);
-        let pool = SqlitePool::connect(connection_string).await?;
+        
+        let pool = match SqlitePool::connect(connection_string).await {
+            Ok(pool) => pool,
+            Err(e) => {
+                eprintln!("SQLite connection error: {}", e);
+                
+                if connection_string.starts_with("sqlite:") {
+                    let path = connection_string.trim_start_matches("sqlite:");
+                    if path != ":memory:" && !path.is_empty() {
+                        let db_path = Path::new(path);
+                        
+                        if !db_path.exists() {
+                            eprintln!("Database file doesn't exist: {}", path);
+                        } else {
+                            eprintln!("Database file exists but couldn't connect. Check permissions.");
+                            
+                            // Try to get more info about the file
+                            match std::fs::metadata(db_path) {
+                                Ok(metadata) => {
+                                    eprintln!("File size: {} bytes", metadata.len());
+                                    let permissions = metadata.permissions();
+                                    eprintln!("File permissions: readonly={}", permissions.readonly());
+                                },
+                                Err(e) => {
+                                    eprintln!("Couldn't get file metadata: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                return Err(e.into());
+            }
+        };
         
         let client = Self { pool };
         

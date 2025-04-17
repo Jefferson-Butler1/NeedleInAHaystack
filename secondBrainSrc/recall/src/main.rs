@@ -1,5 +1,5 @@
 use activity_tracker_common::{
-    db::{GeneralDbClient, SummaryStore},
+    db::GeneralDbClient,
     ActivitySummary,
 };
 use dotenv::dotenv;
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Recall thread started. Listening on 127.0.0.1:8080");
 
     loop {
-        let (mut socket, _) = listener.accept().await?;
+        let (socket, _) = listener.accept().await?;
 
         let query_engine = query_engine.clone();
         let fuzzy_finder = fuzzy_finder.clone();
