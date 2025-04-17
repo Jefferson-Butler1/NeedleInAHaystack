@@ -1,4 +1,4 @@
-use activity_tracker_common::{ActivitySummary, UserEvent, llm::LlmClient};
+use activity_tracker_common::{llm::LlmClient, ActivitySummary, UserEvent};
 use chrono::{DateTime, Utc};
 use std::error::Error;
 
@@ -24,7 +24,12 @@ impl<T: LlmClient> EventAnalyzer<T> {
             .join("\n");
 
         let prompt = format!(
-            "The following are user activity events from {} to {}. \n Describe what the user was doing during this time period:\n\n{}\n\n",
+            "The following are user activity events from {} to {}. These events
+            are mostly keystrokes on macos desktop. Try to string together the 
+            events to figure out what might be going on. For example, if there 
+            is a :wq, the user is likely trying to exit vim. A series of bash 
+            commands would suggest a terminal session.\n Describe
+            what the user was doing during this time period:\n\n{}\n\n",
             start_time, end_time, events_text
         );
 
