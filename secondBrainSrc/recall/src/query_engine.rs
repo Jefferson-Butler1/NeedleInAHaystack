@@ -1,6 +1,7 @@
 use activity_tracker_common::{
+    create_default_client,
     db::{GeneralDbClient, SummaryStore, TimescaleClient, TimescaleSummaryStore},
-    ActivitySummary,
+    ActivitySummary, LlmClient, OllamaClient,
 };
 use chrono::{DateTime, Duration, Utc};
 use std::error::Error;
@@ -12,11 +13,24 @@ pub struct QueryEngine {
 }
 
 impl QueryEngine {
-    pub fn new(sqlite_db: GeneralDbClient, timescale_db: TimescaleClient) -> Self {
+    pub async fn new(sqlite_db: GeneralDbClient, timescale_db: TimescaleClient) -> Self {
+        //initialize the llm_client
         Self {
             sqlite_db,
             timescale_db,
         }
+    }
+
+    pub async fn summarize_summaries(
+        &self,
+        userPrompt: &str,
+        summaries: Vec<ActivitySummary>,
+    ) -> Result<String, Box<dyn Error>> {
+        let prompt = format!(
+            "Given the summaries below, give a short summary, in accordance to the user's preference.: User Prompt: {} Summaries: {} Summary:",
+            userPrompt, summaries.iter().map(|s| s.description.clone()).collect::<Vec<_>>().join("\n") );
+
+        self.llm_client.generate_text(&prompt).await
     }
 
     pub async fn process_query(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error>> {
@@ -134,4 +148,3 @@ impl QueryEngine {
         }
     }
 }
-

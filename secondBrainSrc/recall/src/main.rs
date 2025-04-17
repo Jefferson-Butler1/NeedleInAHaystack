@@ -74,7 +74,7 @@ async fn handle_client(
     query_engine: QueryEngine,
     fuzzy_finder: FuzzyFinder,
 ) -> Result<(), Box<dyn Error>> {
-    let mut buffer = [0; 1024];
+    let mut buffer = [0; 8192]; // Increased buffer size to 8KB
 
     // Read from the socket
     let n = socket.read(&mut buffer).await?;
@@ -87,15 +87,23 @@ async fn handle_client(
     let query = String::from_utf8_lossy(&buffer[..n]).to_string();
     info!("Received query: {}", query.trim());
 
-    // Process the query
-    let response = if query.starts_with("Fuzzy:") {
+    // Check if this is an HTTP request
+    let response = if query.starts_with("GET")
+        || query.starts_with("POST")
+        || query.starts_with("HTTP")
+    {
+        // Send a simple HTTP response
+        format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nSecond Brain Recall Service\r\n\r\nUsage:\r\n- Send plain text queries to search your activity\r\n- Start with 'Fuzzy:' for fuzzy searching\r\n- Try queries like 'today', 'yesterday', 'morning', 'evening'")
+    } else if query.starts_with("Fuzzy:") {
         let search_term = &query[6..];
         match fuzzy_finder.search(search_term).await {
             Ok(summaries) => format_summaries(summaries),
             Err(e) => format!("Error in fuzzy search: {}", e),
         }
     } else {
-        match query_engine.process_query(&query).await {
+        // Extract actual query if there might be HTTP headers
+        let actual_query = query.lines().next().unwrap_or(&query);
+        match query_engine.process_query(actual_query).await {
             Ok(summaries) => format_summaries(summaries),
             Err(e) => format!("Error in query: {}", e),
         }
@@ -129,4 +137,3 @@ fn format_summaries(summaries: Vec<ActivitySummary>) -> String {
         .collect::<Vec<_>>()
         .join("\n---------------\n")
 }
-
