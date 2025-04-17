@@ -1,4 +1,7 @@
-use activity_tracker_common::{ActivitySummary, GeneralDbClient, SummaryStore};
+use activity_tracker_common::{
+    ActivitySummary,
+    db::{GeneralDbClient, SummaryStore}
+};
 use std::error::Error;
 
 #[derive(Clone)]

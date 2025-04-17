@@ -1,13 +1,13 @@
-use activity_tracker_common::{ActivitySummary, OllamaClient, UserEvent};
+use activity_tracker_common::{ActivitySummary, UserEvent, llm::LlmClient};
 use chrono::{DateTime, Utc};
 use std::error::Error;
 
-pub struct EventAnalyzer {
-    llm_client: OllamaClient,
+pub struct EventAnalyzer<T: LlmClient> {
+    llm_client: T,
 }
 
-impl EventAnalyzer {
-    pub fn new(llm_client: OllamaClient) -> Self {
+impl<T: LlmClient> EventAnalyzer<T> {
+    pub fn new(llm_client: T) -> Self {
         Self { llm_client }
     }
 
@@ -36,7 +36,7 @@ impl EventAnalyzer {
             start_time,
             end_time,
             description,
-            event_count: events.len(),
+            events,
             tags,
         })
     }
