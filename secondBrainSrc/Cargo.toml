@@ -6,6 +6,7 @@ members = [
     "learner",
     "thinker",
     "recall",
+    "ui",
 ]
 
 [workspace.dependencies]
