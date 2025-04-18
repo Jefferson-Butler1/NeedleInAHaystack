@@ -111,9 +111,6 @@ impl GeneralDbClient {
             
             CREATE INDEX IF NOT EXISTS idx_summaries_time_range 
             ON activity_summaries(start_time, end_time);
-            
-            CREATE VIRTUAL TABLE IF NOT EXISTS summary_search 
-            USING fts5(description, tags);
             "#
         )
         .execute(&self.pool)
@@ -237,22 +234,65 @@ impl SummaryStore for GeneralDbClient {
     }
 
     async fn search_summaries(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error>> {
-        // Format query for FTS5
-        let search_query = format!("{}*", query.trim());
+        // Simple approach: search for each word with LIKE
+        let search_terms = query.split_whitespace()
+            .filter(|term| !term.is_empty())
+            .map(|term| format!("%{}%", term))
+            .collect::<Vec<_>>();
         
-        let rows = sqlx::query(
+        // If no search terms, return recent summaries
+        if search_terms.is_empty() {
+            let rows = sqlx::query(
+                r#"
+                SELECT id, start_time, end_time, description, tags, events_json
+                FROM activity_summaries
+                ORDER BY start_time DESC
+                LIMIT 10
+                "#
+            )
+            .fetch_all(&self.pool)
+            .await?;
+            
+            let mut summaries = Vec::with_capacity(rows.len());
+            for row in rows {
+                let id: i64 = row.get("id");
+                let start_time: DateTime<Utc> = row.get("start_time");
+                let end_time: DateTime<Utc> = row.get("end_time");
+                let description: String = row.get("description");
+                let tags_json: String = row.get("tags");
+                let events_json: String = row.get("events_json");
+                
+                let summary = Self::parse_summary_from_row(
+                    id, start_time, end_time, description, tags_json, events_json
+                )?;
+                
+                summaries.push(summary);
+            }
+            return Ok(summaries);
+        }
+        
+        // Build a query that searches both description and tags using LIKE
+        let mut combined_query = String::from(
             r#"
-            SELECT a.id, a.start_time, a.end_time, a.description, a.tags, a.events_json
-            FROM summary_search s
-            JOIN activity_summaries a ON s.rowid = a.id
-            WHERE s.description MATCH ? OR s.tags MATCH ?
-            ORDER BY a.start_time DESC
+            SELECT id, start_time, end_time, description, tags, events_json
+            FROM activity_summaries
+            WHERE 
             "#
-        )
-        .bind(&search_query)
-        .bind(&search_query)
-        .fetch_all(&self.pool)
-        .await?;
+        );
+        
+        for (i, term) in search_terms.iter().enumerate() {
+            if i > 0 {
+                combined_query.push_str(" OR ");
+            }
+            combined_query.push_str(&format!("description LIKE '{}'", term));
+            combined_query.push_str(&format!(" OR tags LIKE '{}'", term));
+        }
+        
+        combined_query.push_str(" ORDER BY start_time DESC");
+        
+        let rows = sqlx::query(&combined_query)
+            .fetch_all(&self.pool)
+            .await?;
         
         let mut summaries = Vec::with_capacity(rows.len());
         
@@ -264,9 +304,12 @@ impl SummaryStore for GeneralDbClient {
             let tags_json: String = row.get("tags");
             let events_json: String = row.get("events_json");
             
-            let summary = Self::parse_summary_from_row(
+            let summary = match Self::parse_summary_from_row(
                 id, start_time, end_time, description, tags_json, events_json
-            )?;
+            ) {
+                Ok(s) => s,
+                Err(e) => return Err(e),
+            };
             
             summaries.push(summary);
         }

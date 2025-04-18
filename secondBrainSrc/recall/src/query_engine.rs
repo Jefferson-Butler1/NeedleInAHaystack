@@ -16,10 +16,32 @@ impl QueryEngine {
     }
 
     pub async fn process_query(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error>> {
+        // If it's a time-based query, handle it directly
         if let Some(time_range) = self.parse_time_query(query) {
-            self.db_client.get_summaries_in_timeframe(time_range.0, time_range.1).await
+            return self.db_client.get_summaries_in_timeframe(time_range.0, time_range.1).await;
+        }
+        
+        // Otherwise, sanitize the query and perform a search
+        let clean_query = self.sanitize_query_for_fts(query);
+        self.db_client.search_summaries(&clean_query).await
+    }
+
+    // Add this new method to sanitize queries
+    fn sanitize_query_for_fts(&self, query: &str) -> String {
+        // Remove question marks and other special characters
+        let clean_query = query.chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+            .collect::<String>();
+    
+        // Extract key terms (simplified approach - split by spaces and take words 3+ chars)
+        let terms = clean_query.split_whitespace()
+            .filter(|word| word.len() >= 3)
+            .collect::<Vec<_>>();
+    
+        if terms.is_empty() {
+            "user activity".to_string() // Fallback search term
         } else {
-            self.db_client.search_summaries(query).await
+            terms.join(" ") // Join with OR for more permissive matching
         }
     }
 
