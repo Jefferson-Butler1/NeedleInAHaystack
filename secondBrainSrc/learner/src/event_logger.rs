@@ -8,12 +8,12 @@ use tokio::sync::mpsc;
 
 const MAX_BUFFER_SIZE: usize = 1000;
 
-pub struct Keylogger {
+pub struct EventLogger {
     event_buffer: Arc<Mutex<VecDeque<UserEvent>>>,
     _rx: Option<mpsc::Receiver<()>>,
 }
 
-impl Keylogger {
+impl EventLogger {
     pub fn new() -> Self {
         let event_buffer = Arc::new(Mutex::new(VecDeque::with_capacity(MAX_BUFFER_SIZE)));
         let buffer_clone = event_buffer.clone();
@@ -31,7 +31,6 @@ impl Keylogger {
             // Process keyboard events
             let window_listener = listener::WindowListener::new();
             if let Err(error) = window_listener.listen_with_callback(move |event| {
-                println!("Event: {:?}", event);
                 match event.event.event_type {
                     RdevEventType::KeyPress(key) => {
                         // Update modifier key state
@@ -78,9 +77,10 @@ impl Keylogger {
                                 .to_string();
 
                                 // Get window title if available or generate one from app name
-                                let window_title = event.window_title.clone().unwrap_or_else(|| 
-                                    extract_window_title_from_target(&event.target_app)
-                                );
+                                let window_title =
+                                    event.window_title.clone().unwrap_or_else(|| {
+                                        extract_window_title_from_target(&event.target_app)
+                                    });
                                 let url = extract_url_from_title(&window_title, &event.target_app);
 
                                 // Create app context from the target_app
@@ -119,14 +119,139 @@ impl Keylogger {
                             _ => {}
                         }
                     }
-                    _ => {} // Ignore other event types like mouse movements
+                    RdevEventType::ButtonPress(button) => {
+                        // Handle mouse button presses
+                        let button_str = format!("{:?}", button);
+                        println!("Mouse button press: {} in app: {}", button_str, event.target_app);
+                        
+                        // Build modifiers list
+                        let mut modifiers = Vec::new();
+                        if shift_pressed {
+                            modifiers.push("Shift".to_string());
+                        }
+                        if ctrl_pressed {
+                            modifiers.push("Ctrl".to_string());
+                        }
+                        if alt_pressed {
+                            modifiers.push("Alt".to_string());
+                        }
+                        if meta_pressed {
+                            modifiers.push("Meta".to_string());
+                        }
+                        
+                        // Create mouse data as JSON
+                        let mouse_data = serde_json::json!({
+                            "button": button_str,
+                            "action": "press",
+                            "modifiers": modifiers
+                        })
+                        .to_string();
+                        
+                        // Get window title if available or generate one from app name
+                        let window_title = event.window_title.clone().unwrap_or_else(|| {
+                            extract_window_title_from_target(&event.target_app)
+                        });
+                        let url = extract_url_from_title(&window_title, &event.target_app);
+                        
+                        // Create app context from the target_app
+                        let app_context = AppContext {
+                            app_name: event.target_app.clone(),
+                            window_title,
+                            url,
+                        };
+                        
+                        // Create the user event with the active window info
+                        let user_event = UserEvent {
+                            timestamp: Utc::now(),
+                            event: "mouse".to_string(),
+                            data: mouse_data,
+                            app_context,
+                        };
+                        
+                        // Add to buffer
+                        let mut buffer = buffer_clone.lock().unwrap();
+                        buffer.push_back(user_event);
+                        
+                        // If buffer is full, remove oldest event
+                        if buffer.len() > MAX_BUFFER_SIZE {
+                            buffer.pop_front();
+                        }
+                    }
+                    RdevEventType::ButtonRelease(button) => {
+                        // Log button releases if needed
+                        println!("Mouse button release: {:?} in app: {}", button, event.target_app);
+                    }
+                    RdevEventType::Wheel { delta_x, delta_y } => {
+                        // Handle mouse wheel events
+                        println!("Mouse wheel: delta_x={}, delta_y={} in app: {}", 
+                                 delta_x, delta_y, event.target_app);
+                        
+                        // Only log significant wheel movements to avoid spam
+                        if delta_x.abs() > 0 || delta_y.abs() > 0 {
+                            // Build modifiers list
+                            let mut modifiers = Vec::new();
+                            if shift_pressed {
+                                modifiers.push("Shift".to_string());
+                            }
+                            if ctrl_pressed {
+                                modifiers.push("Ctrl".to_string());
+                            }
+                            if alt_pressed {
+                                modifiers.push("Alt".to_string());
+                            }
+                            if meta_pressed {
+                                modifiers.push("Meta".to_string());
+                            }
+                            
+                            // Create wheel data as JSON
+                            let wheel_data = serde_json::json!({
+                                "delta_x": delta_x,
+                                "delta_y": delta_y,
+                                "modifiers": modifiers
+                            })
+                            .to_string();
+                            
+                            // Get window title if available or generate one from app name
+                            let window_title = event.window_title.clone().unwrap_or_else(|| {
+                                extract_window_title_from_target(&event.target_app)
+                            });
+                            let url = extract_url_from_title(&window_title, &event.target_app);
+                            
+                            // Create app context from the target_app
+                            let app_context = AppContext {
+                                app_name: event.target_app.clone(),
+                                window_title,
+                                url,
+                            };
+                            
+                            // Create the user event with the active window info
+                            let user_event = UserEvent {
+                                timestamp: Utc::now(),
+                                event: "wheel".to_string(),
+                                data: wheel_data,
+                                app_context,
+                            };
+                            
+                            // Add to buffer
+                            let mut buffer = buffer_clone.lock().unwrap();
+                            buffer.push_back(user_event);
+                            
+                            // If buffer is full, remove oldest event
+                            if buffer.len() > MAX_BUFFER_SIZE {
+                                buffer.pop_front();
+                            }
+                        }
+                    }
+                    RdevEventType::MouseMove { .. } => {
+                        // Intentionally ignored to avoid clutter
+                    }
                 }
             }) {
-                eprintln!("Error in keylogger: {:?}", error);
+                eprintln!("Error in event logger: {:?}", error);
             }
         });
 
-        Keylogger {
+        EventLogger {
             event_buffer,
             _rx: Some(rx),
         }
@@ -180,4 +305,3 @@ fn extract_url_from_title(title: &str, app_name: &str) -> Option<String> {
 
     None
 }
-

@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use tokio::time::{interval, Duration};
 
-mod keylogger;
+mod event_logger;
 
-use keylogger::Keylogger;
+use event_logger::EventLogger;
 
 // Constants
 const DEFAULT_DB_URL: &str = "postgres://postgres:postgres@localhost:5435/second_brain";
@@ -49,9 +49,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     };
 
-    println!("🔑 Initializing keylogger...");
-    let keylogger = Keylogger::new();
-    println!("✅ Keylogger initialized");
+    println!("🔑 Initializing event logger...");
+    let event_logger = EventLogger::new();
+    println!("✅ Event logger initialized");
 
     // Set up statistics trackers
     let total_events = AtomicUsize::new(0);
@@ -64,11 +64,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     loop {
         tokio::select! {
             _ = poll_timer.tick() => {
-                // Poll for keyboard events
-                while let Some(key_event) = keylogger.poll() {
+                // Poll for input events
+                while let Some(input_event) = event_logger.poll() {
                     total_events.fetch_add(1, Ordering::Relaxed);
 
-                    match client.store_event(key_event).await {
+                    match client.store_event(input_event).await {
                         Ok(_) => {},
                         Err(e) => eprintln!("❌ Error storing event: {}", e),
                     }
