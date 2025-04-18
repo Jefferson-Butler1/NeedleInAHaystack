@@ -29,131 +29,31 @@ impl Keylogger {
             let mut alt_pressed = false;
             let mut meta_pressed = false;
 
-            // Helper function to check if string looks like a URL
-            fn is_likely_url(text: &str) -> bool {
-                let text = text.trim();
-                text.starts_with("http") || 
-                text.starts_with("www.") || 
-                text.contains(".com") ||
-                text.contains(".org") ||
-                text.contains(".net") ||
-                text.contains(".io") ||
-                text.contains(".app") ||
-                text.contains(".dev")
-            }
-
-            // Callback that processes each keyboard event
+            // Process keyboard events
             if let Err(error) = listen(move |event| {
                 match event.event_type {
                     RdevEventType::KeyPress(key) => {
-                        // Update modifier state
+                        // Update modifier key state
                         match key {
-                            Key::ShiftLeft | Key::ShiftRight => shift_pressed = true,
-                            Key::ControlLeft | Key::ControlRight => ctrl_pressed = true,
-                            Key::Alt | Key::AltGr => alt_pressed = true,
-                            Key::MetaLeft | Key::MetaRight => meta_pressed = true,
+                            Key::ShiftLeft | Key::ShiftRight => {
+                                shift_pressed = true;
+                            }
+                            Key::ControlLeft | Key::ControlRight => {
+                                ctrl_pressed = true;
+                            }
+                            Key::Alt | Key::AltGr => {
+                                alt_pressed = true;
+                            }
+                            Key::MetaLeft | Key::MetaRight => {
+                                meta_pressed = true;
+                            }
                             _ => {
+                                // For non-modifier keys, record the event
                                 let key_str = format!("{:?}", key);
-
-                                // Get current active window info
-                                let app_context = match active_win::get_active_window() {
-                                    Ok(window) => {
-                                        // Debug output to see what app name actually comes through
-                                        println!("Debug - Window title: {}, App name: {}", window.title, window.app_name);
-                                        
-                                        // Directly check for monkeytype in the title as a special case
-                                        if window.title.contains("monkeytype") {
-                                            // This is a monkeytype session, explicitly mark as Zen browser
-                                            let modified_app_name = "Zen Browser".to_string();
-                                            let browser_url = if window.title.contains("https://") {
-                                                // Extract URL if present
-                                                Some(window.title.to_string())
-                                            } else {
-                                                // Default to monkeytype website
-                                                Some("https://monkeytype.com".to_string())
-                                            };
-                                            
-                                            AppContext {
-                                                app_name: modified_app_name,
-                                                window_title: window.title,
-                                                url: browser_url,
-                                            }
-                                        } else {
-                                            // Normal processing for other cases
-                                            let normalized_app_name = window.app_name.to_lowercase();
-                                            
-                                            // Detect browser type - now includes more possibilities for Zen
-                                            let is_browser = normalized_app_name.contains("zen") || 
-                                                            window.title.contains("mozilla") ||  // Zen is based on Mozilla
-                                                            window.title.contains("firefox") ||  // Additional Firefox clues
-                                                            normalized_app_name.contains("chrome") || 
-                                                            normalized_app_name.contains("firefox") || 
-                                                            normalized_app_name.contains("safari") || 
-                                                            normalized_app_name.contains("edge") ||
-                                                            normalized_app_name.contains("opera") ||
-                                                            normalized_app_name.contains("brave");
-                                        
-                                            // Extract URL from title for browsers
-                                            let browser_url = if is_browser {
-                                                // Try to extract URL using several common patterns
-                                                
-                                                // Pattern 1: URL at beginning until separator
-                                                if let Some(i) = window.title.find(" - ") {
-                                                    let potential_url = window.title.split_at(i).0.trim();
-                                                    if is_likely_url(potential_url) {
-                                                        Some(potential_url.to_string())
-                                                    } else {
-                                                        None
-                                                    }
-                                                } 
-                                                // Pattern 2: URL at end after separator
-                                                else if let Some(i) = window.title.rfind(" | ") {
-                                                    let potential_url = window.title.split_at(i+3).1.trim();
-                                                    if is_likely_url(potential_url) {
-                                                        Some(potential_url.to_string())
-                                                    } else {
-                                                        None
-                                                    }
-                                                }
-                                                // Pattern 3: Title looks like a URL itself
-                                                else if is_likely_url(&window.title) {
-                                                    Some(window.title.clone())
-                                                } 
-                                                else {
-                                                    None
-                                                }
-                                            } else {
-                                                None
-                                            };
-
-                                            // Special handling for browsers to make them more identifiable
-                                            let display_app_name = if is_browser && !normalized_app_name.contains("zen") {
-                                                // For known browsers, make the app name clearer
-                                                if window.title.contains("monkeytype") {
-                                                    "Zen Browser".to_string()
-                                                } else {
-                                                    // Keep original name but with Browser prefix for clarity
-                                                    format!("{} Browser", window.app_name)
-                                                }
-                                            } else {
-                                                // For non-browsers or already-identified browsers, keep original name
-                                                window.app_name.clone()
-                                            };
-                                            
-                                            AppContext {
-                                                app_name: display_app_name,
-                                                window_title: window.title,
-                                                url: browser_url,
-                                            }
-                                        }
-                                    }
-                                    Err(_) => AppContext {
-                                        app_name: "unknown".to_string(),
-                                        window_title: "unknown".to_string(),
-                                        url: None,
-                                    },
-                                };
-
+                                
+                                // Get the current active window - will be polled at the moment of keypress
+                                let window_info = get_active_window_info();
+                                
                                 // Build modifiers list
                                 let mut modifiers = Vec::new();
                                 if shift_pressed {
@@ -176,12 +76,12 @@ impl Keylogger {
                                 })
                                 .to_string();
 
-                                // Create the user event
+                                // Create the user event with the active window info
                                 let event = UserEvent {
                                     timestamp: Utc::now(),
                                     event: "keystroke".to_string(),
                                     data: key_data,
-                                    app_context,
+                                    app_context: window_info,
                                 };
 
                                 // Add to buffer
@@ -196,7 +96,7 @@ impl Keylogger {
                         }
                     }
                     RdevEventType::KeyRelease(key) => {
-                        // Update modifier state
+                        // Update modifier key state
                         match key {
                             Key::ShiftLeft | Key::ShiftRight => shift_pressed = false,
                             Key::ControlLeft | Key::ControlRight => ctrl_pressed = false,
@@ -205,10 +105,10 @@ impl Keylogger {
                             _ => {}
                         }
                     }
-                    _ => {} // Ignore other event types
+                    _ => {} // Ignore other event types like mouse movements
                 }
             }) {
-                eprintln!("Error: {:?}", error);
+                eprintln!("Error in keylogger: {:?}", error);
             }
         });
 
@@ -222,4 +122,81 @@ impl Keylogger {
         let mut buffer = self.event_buffer.lock().unwrap();
         buffer.pop_front()
     }
+}
+
+/// Get information about the currently active window
+fn get_active_window_info() -> AppContext {
+    // Get current active window
+    match active_win::get_active_window() {
+        Ok(window) => {
+            // Additional logging to debug window detection issues
+            println!("Active window - Title: '{}', App: '{}'", window.title, window.app_name);
+            
+            // Handle special cases like monkeytype
+            if window.title.to_lowercase().contains("monkeytype") {
+                return AppContext {
+                    app_name: "Zen Browser".to_string(),
+                    window_title: window.title,
+                    url: Some("https://monkeytype.com".to_string()),
+                };
+            }
+            
+            // Extract URL from window title for browser windows
+            let url = extract_url_from_title(&window.title, &window.app_name);
+            
+            // Create the app context
+            AppContext {
+                app_name: window.app_name,
+                window_title: window.title,
+                url,
+            }
+        },
+        Err(_) => {
+            println!("Failed to get active window info");
+            AppContext {
+                app_name: "unknown".to_string(),
+                window_title: "unknown".to_string(),
+                url: None,
+            }
+        }
+    }
+}
+
+/// Extracts a URL from a window title if one exists
+fn extract_url_from_title(title: &str, app_name: &str) -> Option<String> {
+    let lowercase_app = app_name.to_lowercase();
+    let is_browser = lowercase_app.contains("zen") || 
+                    lowercase_app.contains("chrome") || 
+                    lowercase_app.contains("firefox") || 
+                    lowercase_app.contains("safari");
+                    
+    if !is_browser {
+        return None;
+    }
+    
+    // Common URL patterns in browser titles
+    
+    // Pattern 1: Title starts with URL
+    if title.starts_with("http://") || title.starts_with("https://") {
+        if let Some(i) = title.find(" ") {
+            return Some(title[0..i].to_string());
+        }
+    }
+    
+    // Pattern 2: URL followed by separator
+    if let Some(i) = title.find(" - ") {
+        let potential_url = &title[0..i];
+        if potential_url.contains(".com") || 
+           potential_url.contains(".org") || 
+           potential_url.contains(".net") {
+            return Some(potential_url.to_string());
+        }
+    }
+    
+    // Pattern 3: URL as part of title for known sites
+    if title.to_lowercase().contains("monkeytype") {
+        return Some("https://monkeytype.com".to_string());
+    }
+    
+    None
 }
