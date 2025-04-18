@@ -1,5 +1,5 @@
 use active_win_pos_rs as active_win;
-use activity_tracker_common::{AppContext, UserEvent};
+use activity_tracker_common::{listener, AppContext, UserEvent};
 use chrono::Utc;
 use rdev::{listen, EventType as RdevEventType, Key};
 use std::collections::VecDeque;
@@ -30,7 +30,8 @@ impl Keylogger {
             let mut meta_pressed = false;
 
             // Process keyboard events
-            if let Err(error) = listen(move |event| {
+            if let Err(error) = listener::WindowListener::listen(move |event| {
+                println!("Event: {:?}", event);
                 match event.event_type {
                     RdevEventType::KeyPress(key) => {
                         // Update modifier key state
@@ -50,10 +51,12 @@ impl Keylogger {
                             _ => {
                                 // For non-modifier keys, record the event
                                 let key_str = format!("{:?}", key);
-                                
-                                // Get the current active window - will be polled at the moment of keypress
+
+                                // Get the current active window for EACH keypress
+                                // This is critical - we MUST check active window for every single keypress
                                 let window_info = get_active_window_info();
-                                
+                                println!("Keystroke: {} in app: {}", key_str, window_info.app_name);
+
                                 // Build modifiers list
                                 let mut modifiers = Vec::new();
                                 if shift_pressed {
@@ -130,27 +133,19 @@ fn get_active_window_info() -> AppContext {
     match active_win::get_active_window() {
         Ok(window) => {
             // Additional logging to debug window detection issues
-            println!("Active window - Title: '{}', App: '{}'", window.title, window.app_name);
-            
-            // Handle special cases like monkeytype
-            if window.title.to_lowercase().contains("monkeytype") {
-                return AppContext {
-                    app_name: "Zen Browser".to_string(),
-                    window_title: window.title,
-                    url: Some("https://monkeytype.com".to_string()),
-                };
-            }
-            
+            println!(
+                "🔍 WINDOW DETECTION - Title: '{}', App: '{}', full_data: {:#?}",
+                window.title, window.app_name, window
+            );
             // Extract URL from window title for browser windows
             let url = extract_url_from_title(&window.title, &window.app_name);
-            
             // Create the app context
             AppContext {
                 app_name: window.app_name,
                 window_title: window.title,
                 url,
             }
-        },
+        }
         Err(_) => {
             println!("Failed to get active window info");
             AppContext {
@@ -165,38 +160,35 @@ fn get_active_window_info() -> AppContext {
 /// Extracts a URL from a window title if one exists
 fn extract_url_from_title(title: &str, app_name: &str) -> Option<String> {
     let lowercase_app = app_name.to_lowercase();
-    let is_browser = lowercase_app.contains("zen") || 
-                    lowercase_app.contains("chrome") || 
-                    lowercase_app.contains("firefox") || 
-                    lowercase_app.contains("safari");
-                    
+    let is_browser = lowercase_app.contains("zen")
+        || lowercase_app.contains("chrome")
+        || lowercase_app.contains("firefox")
+        || lowercase_app.contains("safari");
+
     if !is_browser {
         return None;
     }
-    
+
     // Common URL patterns in browser titles
-    
+
     // Pattern 1: Title starts with URL
     if title.starts_with("http://") || title.starts_with("https://") {
         if let Some(i) = title.find(" ") {
             return Some(title[0..i].to_string());
         }
     }
-    
+
     // Pattern 2: URL followed by separator
     if let Some(i) = title.find(" - ") {
         let potential_url = &title[0..i];
-        if potential_url.contains(".com") || 
-           potential_url.contains(".org") || 
-           potential_url.contains(".net") {
+        if potential_url.contains(".com")
+            || potential_url.contains(".org")
+            || potential_url.contains(".net")
+        {
             return Some(potential_url.to_string());
         }
     }
-    
-    // Pattern 3: URL as part of title for known sites
-    if title.to_lowercase().contains("monkeytype") {
-        return Some("https://monkeytype.com".to_string());
-    }
-    
+
     None
 }
+

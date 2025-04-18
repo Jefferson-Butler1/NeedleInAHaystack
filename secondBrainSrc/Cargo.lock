@@ -23,6 +23,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "dotenv",
+ "rdev",
  "reqwest",
  "serde",
  "serde_json",
