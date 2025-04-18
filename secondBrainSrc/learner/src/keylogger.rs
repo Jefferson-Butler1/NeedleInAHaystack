@@ -1,7 +1,7 @@
 use active_win_pos_rs as active_win;
 use activity_tracker_common::{listener, AppContext, UserEvent};
 use chrono::Utc;
-use rdev::{listen, EventType as RdevEventType, Key};
+use rdev::{EventType as RdevEventType, Key};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -30,9 +30,10 @@ impl Keylogger {
             let mut meta_pressed = false;
 
             // Process keyboard events
-            if let Err(error) = listener::WindowListener::listen(move |event| {
+            let window_listener = listener::WindowListener::new();
+            if let Err(error) = window_listener.listen_with_callback(move |event| {
                 println!("Event: {:?}", event);
-                match event.event_type {
+                match event.event.event_type {
                     RdevEventType::KeyPress(key) => {
                         // Update modifier key state
                         match key {
@@ -55,7 +56,7 @@ impl Keylogger {
                                 // Get the current active window for EACH keypress
                                 // This is critical - we MUST check active window for every single keypress
                                 let window_info = get_active_window_info();
-                                println!("Keystroke: {} in app: {}", key_str, window_info.app_name);
+                                println!("Keystroke: {} in app: {}, event target: {}", key_str, window_info.app_name, event.target_app);
 
                                 // Build modifiers list
                                 let mut modifiers = Vec::new();

@@ -1,4 +1,4 @@
-use rdev::{listen, Event, EventType, Key};
+use rdev::{listen, Event};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -18,7 +18,6 @@ pub struct EnhancedEvent {
 
 pub struct WindowListener {
     active_window: Arc<Mutex<String>>,
-    callback: Option<Box<dyn Fn(EnhancedEvent) + Send + 'static>>,
 }
 
 impl WindowListener {
@@ -38,28 +37,15 @@ impl WindowListener {
 
         WindowListener {
             active_window,
-            callback: None,
         }
     }
 
-    /// Set the callback function that will be called for each enhanced event
-    pub fn set_callback<F>(&mut self, callback: F)
+    /// Start listening for events with the provided callback
+    pub fn listen_with_callback<F>(&self, mut callback: F) -> Result<(), rdev::ListenError> 
     where
-        F: Fn(EnhancedEvent) + Send + 'static,
+        F: FnMut(EnhancedEvent) + Send + 'static,
     {
-        self.callback = Some(Box::new(callback));
-    }
-
-    /// Start listening for events
-    pub fn listen(&self) -> Result<(), rdev::ListenError> {
         let active_window = Arc::clone(&self.active_window);
-        let callback = self.callback.as_ref().cloned();
-
-        if callback.is_none() {
-            return Err(rdev::ListenError::ReceiverError);
-        }
-
-        let callback = callback.unwrap();
 
         listen(move |event: Event| {
             let target_app = active_window.lock().unwrap().clone();
@@ -67,6 +53,12 @@ impl WindowListener {
 
             callback(enhanced_event);
         })
+    }
+    
+    /// Start listening for events
+    pub fn listen(&self) -> Result<(), rdev::ListenError> {
+        // By default, do nothing with events
+        self.listen_with_callback(|_| {})
     }
 
     /// Get the currently active window name based on the operating system
@@ -146,14 +138,12 @@ impl WindowListener {
 
     /// Example function to print event info with active window
     pub fn print_events() -> Result<(), rdev::ListenError> {
-        let mut listener = WindowListener::new();
+        let listener = WindowListener::new();
 
-        listener.set_callback(|enhanced_event| {
+        listener.listen_with_callback(|enhanced_event| {
             println!("Event: {:?}", enhanced_event.event);
             println!("Target App: {}", enhanced_event.target_app);
             println!("---");
-        });
-
-        listener.listen()
+        })
     }
 }

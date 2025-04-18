@@ -35,9 +35,12 @@ struct GenerateOptions {
 
 #[derive(Deserialize, Debug)]
 struct GenerateResponse {
+    #[allow(dead_code)]
     model: String,
+    #[allow(dead_code)]
     created_at: String,
     response: String,
+    #[allow(dead_code)]
     done: bool,
 }
 
