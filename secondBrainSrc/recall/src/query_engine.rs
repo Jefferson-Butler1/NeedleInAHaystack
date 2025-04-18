@@ -1,11 +1,15 @@
 use activity_tracker_common::{
     ActivitySummary, UserEvent,
-    db::{GeneralDbClient, EventStore, TimescaleClient}
+    db::{EventStore, TimescaleClient}
 };
-use chrono::{DateTime, Datelike, Duration, Local, NaiveTime, TimeZone, Timelike, Utc};
-use sqlx::{Pool, PgPool, Row, Postgres, postgres::PgRow};
+use chrono::{DateTime, Utc};
+use sqlx::{Pool, Row, Postgres, postgres::PgRow};
 use std::error::Error;
 use std::sync::Arc;
+
+use crate::utils::timeframe::{Timeframe, parse_timeframe};
+use crate::utils::app_detection::extract_app_name;
+use crate::utils::search::sanitize_query_for_search;
 
 /// QueryEngine is responsible for processing user queries and retrieving relevant data
 #[derive(Clone)]
@@ -25,10 +29,10 @@ impl QueryEngine {
     /// Process a natural language query and return relevant summaries or events
     pub async fn process_query(&self, query: &str) -> Result<QueryResult, Box<dyn Error + Send + Sync>> {
         // Parse the timeframe from the query
-        let timeframe = self.parse_timeframe(query);
+        let timeframe = parse_timeframe(query);
         
         // Check if the query is app-specific
-        let app_filter = self.extract_app_name(query);
+        let app_filter = extract_app_name(query);
         
         // Try to get summaries for the timeframe from PostgreSQL, optionally filtered by app
         let summaries = if let Some(app_name) = &app_filter {
@@ -67,7 +71,7 @@ impl QueryEngine {
         }
         
         // If we still don't have results, try to search summaries by content
-        let clean_query = self.sanitize_query_for_search(query);
+        let clean_query = sanitize_query_for_search(query);
         let summaries = if let Some(app_name) = &app_filter {
             self.search_summaries_by_app(&clean_query, app_name).await?
         } else {
@@ -89,56 +93,6 @@ impl QueryEngine {
             query: query.to_string(),
             app_filter,
         })
-    }
-    
-    /// Extract application name from the query if present
-    fn extract_app_name(&self, query: &str) -> Option<String> {
-        let query = query.to_lowercase();
-        
-        // Common apps to look for
-        let known_apps = [
-            "ghostty", "vscode", "visual studio code", "chrome", "firefox", 
-            "safari", "terminal", "slack", "discord", "notion", "figma"
-        ];
-        
-        // Check for "in {app}" or "using {app}" patterns
-        for &app in &known_apps {
-            let patterns = [
-                format!(" in {} ", app),
-                format!(" on {} ", app),
-                format!(" using {} ", app),
-                format!(" with {} ", app),
-                format!(" at {} ", app),
-            ];
-            
-            for pattern in &patterns {
-                if query.contains(pattern) {
-                    return Some(app.to_string());
-                }
-            }
-            
-            // Also check if app name is at the beginning or end of a sentence
-            let start_patterns = [
-                format!(" in {}.", app),
-                format!(" on {}.", app),
-                format!(" using {}.", app),
-                format!(" with {}.", app),
-                format!(" at {}.", app),
-                format!(" in {}?", app),
-                format!(" on {}?", app),
-                format!(" using {}?", app),
-                format!(" with {}?", app),
-                format!(" at {}?", app),
-            ];
-            
-            for pattern in &start_patterns {
-                if query.contains(pattern) {
-                    return Some(app.to_string());
-                }
-            }
-        }
-        
-        None
     }
     
     /// Get events filtered by app name
@@ -349,121 +303,6 @@ impl QueryEngine {
         
         Ok(vec![event])
     }
-
-    /// Sanitize and extract key terms from the query for FTS search
-    fn sanitize_query_for_search(&self, query: &str) -> String {
-        // Remove question marks and other special characters
-        let clean_query = query.chars()
-            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
-            .collect::<String>();
-    
-        // Extract key terms (split by spaces and take words 3+ chars)
-        let terms = clean_query.split_whitespace()
-            .filter(|word| word.len() >= 3)
-            .collect::<Vec<_>>();
-    
-        if terms.is_empty() {
-            "user activity".to_string() // Fallback search term
-        } else {
-            terms.join(" OR ") // Join with OR for more permissive matching
-        }
-    }
-
-    /// Parse a timeframe from a natural language query
-    fn parse_timeframe(&self, query: &str) -> Timeframe {
-        let now = Utc::now();
-        let query = query.to_lowercase();
-        
-        // Today
-        if query.contains("today") {
-            let start = Local::now().date_naive().and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()).and_local_timezone(Utc).unwrap();
-            return Timeframe {
-                start,
-                end: now,
-                description: "today".to_string(),
-            };
-        }
-        
-        // Yesterday
-        if query.contains("yesterday") {
-            let start = (Local::now() - Duration::days(1)).date_naive().and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()).and_local_timezone(Utc).unwrap();
-            let end = Local::now().date_naive().and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()).and_local_timezone(Utc).unwrap();
-            return Timeframe {
-                start,
-                end,
-                description: "yesterday".to_string(),
-            };
-        }
-        
-        // This week
-        if query.contains("this week") {
-            let days_since_monday = Local::now().weekday().num_days_from_monday() as i64;
-            let start = (Local::now() - Duration::days(days_since_monday)).date_naive().and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()).and_local_timezone(Utc).unwrap();
-            return Timeframe {
-                start,
-                end: now,
-                description: "this week".to_string(),
-            };
-        }
-        
-        // Last week
-        if query.contains("last week") {
-            let days_since_monday = Local::now().weekday().num_days_from_monday() as i64;
-            let start = (Local::now() - Duration::days(days_since_monday + 7)).date_naive().and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()).and_local_timezone(Utc).unwrap();
-            let end = (Local::now() - Duration::days(days_since_monday)).date_naive().and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()).and_local_timezone(Utc).unwrap();
-            return Timeframe {
-                start,
-                end,
-                description: "last week".to_string(),
-            };
-        }
-        
-        // This month
-        if query.contains("this month") {
-            let start = Local::now().with_day(1).unwrap().with_hour(0).unwrap().with_minute(0).unwrap().with_second(0).unwrap().with_nanosecond(0).unwrap().with_timezone(&Utc);
-            return Timeframe {
-                start,
-                end: now,
-                description: "this month".to_string(),
-            };
-        }
-        
-        // Last hour
-        if query.contains("last hour") || query.contains("past hour") {
-            let start = now - Duration::hours(1);
-            return Timeframe {
-                start,
-                end: now,
-                description: "the last hour".to_string(),
-            };
-        }
-        
-        // Last 30 minutes
-        if query.contains("30 min") || query.contains("half hour") || query.contains("half an hour") {
-            let start = now - Duration::minutes(30);
-            return Timeframe {
-                start,
-                end: now,
-                description: "the last 30 minutes".to_string(),
-            };
-        }
-        
-        // Default to the last 24 hours
-        let start = now - Duration::hours(24);
-        Timeframe {
-            start,
-            end: now,
-            description: "the last 24 hours".to_string(),
-        }
-    }
-}
-
-/// Represents a timeframe for querying data
-#[derive(Debug, Clone)]
-pub struct Timeframe {
-    pub start: DateTime<Utc>,
-    pub end: DateTime<Utc>,
-    pub description: String,
 }
 
 /// Enum representing different types of query results

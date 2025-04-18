@@ -1,13 +1,9 @@
-use activity_tracker_common::{
-    db::TimescaleClient,
-    llm,
-    llm::LlmClient,
-    UserEvent,
-};
-use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+use activity_tracker_common::{db::TimescaleClient, llm, llm::LlmClient, UserEvent};
 use chrono::Utc;
 use dotenv::dotenv;
 use query_engine::{QueryEngine, QueryResult};
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+mod utils;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::error::Error;
@@ -60,7 +56,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     dotenv().ok();
 
     // Get database URL from environment
-    let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5438/second_brain".to_string());
+    let db_url = env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5438/second_brain".to_string());
 
     println!("🔌 Connecting to PostgreSQL database...");
     // Connect to PostgreSQL
@@ -68,12 +65,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .max_connections(5)
         .connect(&db_url)
         .await?;
-    
+
     println!("✅ Connected to PostgreSQL database");
-    
+
     // Create a shared reference to the PostgreSQL pool
     let pg_pool = Arc::new(pg_pool);
-    
+
     // Also connect to the events database (which is the same in this case)
     println!("🔌 Setting up events database connection...");
     let events_db = match TimescaleClient::new(&db_url).await {
@@ -162,50 +159,67 @@ async fn process_query(
 ) -> String {
     // Process the query using our query engine
     match query_engine.process_query(query).await {
-        Ok(result) => {
-            match result {
-                QueryResult::Summaries {
-                    summaries,
-                    timeframe,
-                    query,
-                    app_filter,
-                } => {
-                    if let Some(app) = app_filter {
-                        format_app_specific_summaries_with_ai(summaries, &timeframe.description, &query, &app, llm_client).await
-                    } else {
-                        format_summaries_with_ai(summaries, &timeframe.description, &query, llm_client).await
-                    }
-                }
-                QueryResult::Events {
-                    events,
-                    timeframe,
-                    query,
-                    app_filter,
-                } => {
-                    if let Some(app) = app_filter {
-                        format_app_specific_events_with_ai(events, &timeframe.description, &query, &app, llm_client).await
-                    } else {
-                        format_events_with_ai(events, &timeframe.description, &query, llm_client).await
-                    }
-                }
-                QueryResult::Empty { timeframe, app_filter, .. } => {
-                    if let Some(app) = app_filter {
-                        format!(
-                            "{}\n\nI don't have any data about what you did in {} during {}.",
-                            random_fishy_no_data(),
-                            app,
-                            timeframe.description
-                        )
-                    } else {
-                        format!(
-                            "{}\n\nI don't have any data about what you did during {}.",
-                            random_fishy_no_data(),
-                            timeframe.description
-                        )
-                    }
+        Ok(result) => match result {
+            QueryResult::Summaries {
+                summaries,
+                timeframe,
+                query,
+                app_filter,
+            } => {
+                if let Some(app) = app_filter {
+                    format_app_specific_summaries_with_ai(
+                        summaries,
+                        &timeframe.description,
+                        &query,
+                        &app,
+                        llm_client,
+                    )
+                    .await
+                } else {
+                    format_summaries_with_ai(summaries, &timeframe.description, &query, llm_client)
+                        .await
                 }
             }
-        }
+            QueryResult::Events {
+                events,
+                timeframe,
+                query,
+                app_filter,
+            } => {
+                if let Some(app) = app_filter {
+                    format_app_specific_events_with_ai(
+                        events,
+                        &timeframe.description,
+                        &query,
+                        &app,
+                        llm_client,
+                    )
+                    .await
+                } else {
+                    format_events_with_ai(events, &timeframe.description, &query, llm_client).await
+                }
+            }
+            QueryResult::Empty {
+                timeframe,
+                app_filter,
+                ..
+            } => {
+                if let Some(app) = app_filter {
+                    format!(
+                        "{}\n\nI don't have any data about what you did in {} during {}.",
+                        random_fishy_no_data(),
+                        app,
+                        timeframe.description
+                    )
+                } else {
+                    format!(
+                        "{}\n\nI don't have any data about what you did during {}.",
+                        random_fishy_no_data(),
+                        timeframe.description
+                    )
+                }
+            }
+        },
         Err(e) => {
             eprintln!("Error processing query: {}", e);
             "🐠 Fishy looks confused... Something went wrong while I was searching my memory. Could you try asking in a different way?".to_string()
@@ -278,13 +292,17 @@ async fn format_app_specific_summaries_with_ai(
     llm_client: &Arc<Mutex<Box<dyn LlmClient + Send + Sync>>>,
 ) -> String {
     if summaries.is_empty() {
-        return format!("{}\n\nI don't have any data about what you did in {} during {}.", 
-            random_fishy_no_data(), app_name, timeframe);
+        return format!(
+            "{}\n\nI don't have any data about what you did in {} during {}.",
+            random_fishy_no_data(),
+            app_name,
+            timeframe
+        );
     }
 
     // Prepare the raw data for the LLM
     let raw_data = prepare_summaries_for_llm(&summaries);
-    
+
     // Generate the app-specific AI response
     match generate_app_specific_response(&raw_data, timeframe, query, app_name, llm_client).await {
         Ok(ai_response) => {
@@ -308,24 +326,39 @@ async fn format_app_specific_events_with_ai(
     llm_client: &Arc<Mutex<Box<dyn LlmClient + Send + Sync>>>,
 ) -> String {
     if events.is_empty() {
-        return format!("{}\n\nI don't have any data about what you did in {} during {}.", 
-            random_fishy_no_data(), app_name, timeframe);
+        return format!(
+            "{}\n\nI don't have any data about what you did in {} during {}.",
+            random_fishy_no_data(),
+            app_name,
+            timeframe
+        );
     }
 
     // Filter events to only include those from the specified app
     let app_name_lower = app_name.to_lowercase();
-    let app_events: Vec<UserEvent> = events.into_iter()
-        .filter(|event| event.app_context.app_name.to_lowercase().contains(&app_name_lower))
+    let app_events: Vec<UserEvent> = events
+        .into_iter()
+        .filter(|event| {
+            event
+                .app_context
+                .app_name
+                .to_lowercase()
+                .contains(&app_name_lower)
+        })
         .collect();
 
     if app_events.is_empty() {
-        return format!("{}\n\nI don't have any data about what you did in {} during {}.", 
-            random_fishy_no_data(), app_name, timeframe);
+        return format!(
+            "{}\n\nI don't have any data about what you did in {} during {}.",
+            random_fishy_no_data(),
+            app_name,
+            timeframe
+        );
     }
 
     // Prepare the raw data for the LLM
     let raw_data = prepare_events_for_llm(&app_events);
-    
+
     // Generate the app-specific AI response
     match generate_app_specific_response(&raw_data, timeframe, query, app_name, llm_client).await {
         Ok(ai_response) => {
@@ -490,17 +523,19 @@ async fn generate_ai_response(
         {}
         
         Please format your response as follows:
-        1. A brief 1-2 sentence natural summary of what the user was doing
+        1. A brief summary of the user's activity 
         2. A markdown table with each app's most relevent activity
         3. 1-2 brief insights or patterns you notice (optional)
         
-        Keep your entire response under 15 lines for readability.
+        add ASCII art.
         Make the markdown table neat and properly formatted with column headers.
         DO NOT start with \"Fishy says\" as that will be added separately.
-        DO NOT add excessive newlines or ASCII art.
+        ALWAYS address the user as 'you', not 'user'
         DO NOT use any prefix like 'Here's what I found:' - just start directly with the summary.",
         timeframe, query, raw_data
     );
+
+    println!("Generating AI response, here's the input:\n\n{}", prompt);
 
     // Get a lock on the LLM client
     let client = llm_client.lock().await;
@@ -592,13 +627,13 @@ async fn generate_app_specific_response(
         DO NOT use any prefix like 'Here's what I found:' - just start directly with the summary.",
         app_name, timeframe, query, raw_data, app_name, app_name, app_name
     );
-    
+
     // Get a lock on the LLM client
     let client = llm_client.lock().await;
-    
+
     // Generate the response
     let response = client.generate_text(&prompt).await?;
-    
+
     Ok(response)
 }
 
@@ -608,13 +643,18 @@ fn format_app_summaries_simple(
     timeframe: &str,
     app_name: &str,
 ) -> String {
-    let mut result = format!("Here's what I found about your {} usage during {}:\n\n", app_name, timeframe);
-    
+    let mut result = format!(
+        "Here's what I found about your {} usage during {}:\n\n",
+        app_name, timeframe
+    );
+
     for (i, summary) in summaries.iter().enumerate() {
-        let time_range = format!("{} to {}", 
+        let time_range = format!(
+            "{} to {}",
             summary.start_time.format("%H:%M"),
-            summary.end_time.format("%H:%M"));
-            
+            summary.end_time.format("%H:%M")
+        );
+
         result.push_str(&format!(
             "{}. {} - {} ({} events)\n",
             i + 1,
@@ -623,32 +663,34 @@ fn format_app_summaries_simple(
             summary.events.len()
         ));
     }
-    
+
     result
 }
 
 /// Simple formatter for app-specific events (fallback if AI fails)
-fn format_app_events_simple(
-    events: &[UserEvent],
-    timeframe: &str,
-    app_name: &str,
-) -> String {
-    let mut result = format!("Here's what I found about your {} usage during {}:\n\n", app_name, timeframe);
-    
+fn format_app_events_simple(events: &[UserEvent], timeframe: &str, app_name: &str) -> String {
+    let mut result = format!(
+        "Here's what I found about your {} usage during {}:\n\n",
+        app_name, timeframe
+    );
+
     // Count event types
     let mut event_type_counts: HashMap<String, usize> = HashMap::new();
     for event in events {
         *event_type_counts.entry(event.event.clone()).or_insert(0) += 1;
     }
-    
-    result.push_str(&format!("You had {} total events in {}\n\n", events.len(), app_name));
-    
+
+    result.push_str(&format!(
+        "You had {} total events in {}\n\n",
+        events.len(),
+        app_name
+    ));
+
     // List event types
     result.push_str("Event types:\n");
     for (event_type, count) in event_type_counts.iter() {
         result.push_str(&format!("- {}: {} events\n", event_type, count));
     }
-    
+
     result
 }
-
