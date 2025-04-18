@@ -1,284 +1,455 @@
 use activity_tracker_common::{
-    db::GeneralDbClient,
+    db::{GeneralDbClient, TimescaleClient},
     llm,
     llm::LlmClient,
-    ActivitySummary,
+    UserEvent,
 };
+use chrono::Utc;
 use dotenv::dotenv;
+use query_engine::{QueryEngine, QueryResult};
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::error::Error;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
-mod fuzzy_finder;
 mod query_engine;
 
-use fuzzy_finder::FuzzyFinder;
-use query_engine::QueryEngine;
+// Personality constants
+const FISHY_INTRO: &[&str] = &[
+    "🐠 Fishy splashes with excitement! ",
+    "🐟 Fishy bubbles up with joy! ",
+    "🐠 Fishy swims over with the info! ",
+    "🐟 Fishy floats to the surface! ",
+    "🐠 Fishy darts around happily! ",
+];
+
+const FISHY_NO_DATA: &[&str] = &[
+    "🐠 Fishy looks confused... I don't seem to remember anything about that. Maybe try asking about a different time period?",
+    "🐟 Fishy scratches his scales... I don't have any memory of that! Would you like to know about something else?",
+    "🐠 Fishy does a sad little loop... I don't have any data matching your question. Try asking about today or yesterday!",
+    "🐟 Fishy checks his tiny fish brain... No memories found! Perhaps I can tell you about something more recent?",
+];
+
+/// Generate a random fishy intro
+fn random_fishy_intro() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    FISHY_INTRO[seed as usize % FISHY_INTRO.len()].to_string()
+}
+
+/// Generate a random fishy no-data message
+fn random_fishy_no_data() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    FISHY_NO_DATA[seed as usize % FISHY_NO_DATA.len()].to_string()
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Load environment variables
     dotenv().ok();
 
-    // Get the summary database URL from environment
-    let summary_db_url =
-        env::var("SUMMARY_DB_URL").unwrap_or_else(|_| "sqlite:./data/summaries.db".to_string());
+    // Get database URLs from environment
+    let summary_db_url = env::var("SUMMARY_DB_URL").unwrap_or_else(|_| "sqlite:./data/summaries.db".to_string());
+    let events_db_url = env::var("DATABASE_URL").ok();
 
     println!("🔌 Connecting to summary database...");
-    let db_client = GeneralDbClient::new(&summary_db_url).await?;
+    let summary_db = GeneralDbClient::new(&summary_db_url).await?;
     println!("✅ Connected to summary database");
 
-    let query_engine = QueryEngine::new(db_client.clone());
-    let fuzzy_finder = FuzzyFinder::new(db_client);
+    // Try to connect to the events database if provided
+    let events_db = if let Some(url) = events_db_url {
+        println!("🔌 Connecting to events database...");
+        match TimescaleClient::new(&url).await {
+            Ok(db) => {
+                println!("✅ Connected to events database");
+                Some(Arc::new(db))
+            }
+            Err(e) => {
+                println!("⚠️ Failed to connect to events database: {}", e);
+                None
+            }
+        }
+    } else {
+        println!("ℹ️ No events database URL provided, operating in summaries-only mode");
+        None
+    };
 
-    // Setup a simple TCP server to handle recall requests
+    // Create LLM client
+    println!("🧠 Initializing LLM client...");
+    let llm_client = match llm::create_default_client().await {
+        Ok(client) => {
+            println!("✅ LLM client initialized");
+            // Convert to Box<dyn LlmClient + Send + Sync>
+            let boxed_client: Box<dyn LlmClient + Send + Sync> = Box::new(client);
+            Arc::new(Mutex::new(boxed_client))
+        }
+        Err(e) => {
+            println!("⚠️ Failed to initialize LLM client: {}", e);
+            return Err(e);
+        }
+    };
+
+    let query_engine = QueryEngine::new(summary_db, events_db);
+
+    // Setup TCP server
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    println!("🚀 Recall thread started. Listening on 127.0.0.1:8080");
+    println!("🚀 Recall service started. Listening on 127.0.0.1:8080");
+    println!("🐠 Fishy is ready to help you remember things!");
 
     loop {
         let (socket, _) = listener.accept().await?;
-
         let query_engine = query_engine.clone();
-        let fuzzy_finder = fuzzy_finder.clone();
+        let llm_client = Arc::clone(&llm_client);
 
-        // Process a client request in a new task
+        // Process request in a new task
         tokio::spawn(async move {
-            handle_client(socket, query_engine, fuzzy_finder).await;
+            handle_client(socket, query_engine, llm_client).await;
         });
-
-        println!("Recall thread is running...");
     }
 }
 
-// Separate function to handle client connections
+/// Handle a client request
 async fn handle_client(
     mut socket: tokio::net::TcpStream,
     query_engine: QueryEngine,
-    fuzzy_finder: FuzzyFinder,
+    llm_client: Arc<Mutex<Box<dyn LlmClient + Send + Sync>>>,
 ) {
-    let mut buffer = [0; 1024];
+    let mut buffer = [0; 4096]; // Increased buffer size for larger queries
 
     // Read from the socket
     let n = match socket.read(&mut buffer).await {
         Ok(n) => n,
         Err(e) => {
-            println!("Error reading from socket: {}", e);
+            eprintln!("Error reading from socket: {}", e);
             return;
         }
     };
 
-    // Convert bytes to string
-    let query = String::from_utf8_lossy(&buffer[..n]).to_string();
+    // Convert bytes to string and trim any whitespace
+    let query = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
 
-    // Process the query and generate a response string
-    let response = process_query(&query, &query_engine, &fuzzy_finder).await;
-    let _ = socket.write_all(response.as_bytes()).await;
-}
+    println!("📝 Received query: {}", query);
 
-// Process the query and generate a response
-async fn process_query(
-    query: &str, 
-    query_engine: &QueryEngine, 
-    fuzzy_finder: &FuzzyFinder
-) -> String {
-    if query.starts_with("Fuzzy:") {
-        let search_term = &query[6..];
-        match fuzzy_finder.search(search_term).await {
-            Ok(summaries) => {
-                let result = format_summaries_with_ai(summaries, query).await;
-                result
-            },
-            Err(e) => format!("Error in fuzzy search: {}", e),
-        }
-    } else {
-        match query_engine.process_query(query).await {
-            Ok(summaries) => {
-                let result = format_summaries_with_ai(summaries, query).await;
-                result
-            },
-            Err(e) => format!("Error in query: {}", e),
-        }
-    }
-}
-
-// New function that adds AI distillation before formatting
-async fn format_summaries_with_ai(summaries: Vec<ActivitySummary>, query: &str) -> String {
-    if summaries.is_empty() {
-        return "Fishy says: I don't remember anything matching that query.".to_string();
-    }
-
-    // Prepare summaries data for AI processing
-    let raw_summary = format_summaries_raw(summaries, query);
+    // Process the query
+    let response = process_query(&query, &query_engine, &llm_client).await;
     
-    // Use LLM to create a markdown table summary
-    match distill_with_ai(&raw_summary, query).await {
-        Ok(ai_summary) => {
-            format!("Fishy says:\n\n{}", ai_summary)
+    println!("✅ Sending response (length: {} chars)", response.len());
+    
+    // Send the response back
+    if let Err(e) = socket.write_all(response.as_bytes()).await {
+        eprintln!("Error writing to socket: {}", e);
+    }
+}
+
+/// Process a query and generate a response
+async fn process_query(
+    query: &str,
+    query_engine: &QueryEngine,
+    llm_client: &Arc<Mutex<Box<dyn LlmClient + Send + Sync>>>,
+) -> String {
+    // Process the query using our query engine
+    match query_engine.process_query(query).await {
+        Ok(result) => match result {
+            QueryResult::Summaries { summaries, timeframe, query } => {
+                format_summaries_with_ai(summaries, &timeframe.description, &query, llm_client).await
+            }
+            QueryResult::Events { events, timeframe, query } => {
+                format_events_with_ai(events, &timeframe.description, &query, llm_client).await
+            }
+            QueryResult::Empty { timeframe, .. } => {
+                format!("{}\n\nI don't have any data about what you did during {}.", 
+                    random_fishy_no_data(),
+                    timeframe.description)
+            }
+        },
+        Err(e) => {
+            eprintln!("Error processing query: {}", e);
+            "🐠 Fishy looks confused... Something went wrong while I was searching my memory. Could you try asking in a different way?".to_string()
+        }
+    }
+}
+
+/// Format summaries using AI
+async fn format_summaries_with_ai(
+    summaries: Vec<activity_tracker_common::ActivitySummary>,
+    timeframe: &str,
+    query: &str,
+    llm_client: &Arc<Mutex<Box<dyn LlmClient + Send + Sync>>>,
+) -> String {
+    if summaries.is_empty() {
+        return random_fishy_no_data();
+    }
+
+    // Prepare the raw data for the LLM
+    let raw_data = prepare_summaries_for_llm(&summaries);
+    
+    // Generate the AI response
+    match generate_ai_response(&raw_data, timeframe, query, llm_client).await {
+        Ok(ai_response) => {
+            format!("{}{}", random_fishy_intro(), ai_response)
         }
         Err(e) => {
-            eprintln!("Error with AI distillation: {}", e);
-            // Fall back to regular formatting if AI fails
-            format!("Fishy says:\n{}", raw_summary)
+            eprintln!("Error generating AI response: {}", e);
+            // Fallback to a simple format if AI fails
+            let simple_response = format_summaries_simple(&summaries, timeframe);
+            format!("{}{}", random_fishy_intro(), simple_response)
         }
     }
 }
 
-// Helper function to generate raw summaries for AI processing
-fn format_summaries_raw(summaries: Vec<ActivitySummary>, query: &str) -> String {
+/// Format events using AI
+async fn format_events_with_ai(
+    events: Vec<UserEvent>,
+    timeframe: &str,
+    query: &str,
+    llm_client: &Arc<Mutex<Box<dyn LlmClient + Send + Sync>>>,
+) -> String {
+    if events.is_empty() {
+        return random_fishy_no_data();
+    }
+
+    // Prepare the raw data for the LLM
+    let raw_data = prepare_events_for_llm(&events);
+    
+    // Generate the AI response
+    match generate_ai_response(&raw_data, timeframe, query, llm_client).await {
+        Ok(ai_response) => {
+            format!("{}{}", random_fishy_intro(), ai_response)
+        }
+        Err(e) => {
+            eprintln!("Error generating AI response: {}", e);
+            // Fallback to a simple format if AI fails
+            let simple_response = format_events_simple(&events, timeframe);
+            format!("{}{}", random_fishy_intro(), simple_response)
+        }
+    }
+}
+
+/// Prepare summaries data for LLM processing
+fn prepare_summaries_for_llm(summaries: &[activity_tracker_common::ActivitySummary]) -> String {
     let mut result = String::new();
     
-    // Identify query type
-    let query_lower = query.to_lowercase();
-    let is_key_query = query_lower.contains("key") && 
-                     (query_lower.contains("most") || query_lower.contains("frequent"));
-    let is_app_query = (query_lower.contains("app") || query_lower.contains("application")) && 
-                      (query_lower.contains("most") || query_lower.contains("frequent"));
-    
-    for s in summaries {
-        // Format the time
+    for summary in summaries {
+        // Format time range
         let time_str = format!("{} to {}", 
-            s.start_time.format("%H:%M"),
-            s.end_time.format("%H:%M"));
+            summary.start_time.format("%H:%M"),
+            summary.end_time.format("%H:%M"));
         
-        // Extract the most used keys and apps only when specifically asked about them
-        if is_key_query || is_app_query {
-            // Extract the most used keys
-            let mut key_counts = std::collections::HashMap::new();
-            for event in &s.events {
-                if let Ok(data) = serde_json::from_str::<serde_json::Value>(&event.data) {
-                    if let Some(key) = data.get("key").and_then(|k| k.as_str()) {
-                        *key_counts.entry(key.to_string()).or_insert(0) += 1;
-                    }
-                }
-            }
-            
-            let mut key_vec: Vec<_> = key_counts.into_iter().collect();
-            key_vec.sort_by(|a, b| b.1.cmp(&a.1));
-            
-            // Extract the most used apps
-            let mut app_counts = std::collections::HashMap::new();
-            for event in &s.events {
-                let app_name = if event.app_context.app_name.contains("ghostty") {
-                    "Terminal".to_string()
-                } else if event.app_context.app_name.contains("firefox") {
-                    "Firefox".to_string()
-                } else {
-                    event.app_context.app_name.clone()
-                };
-                
-                *app_counts.entry(app_name).or_insert(0) += 1;
-            }
-            
-            let mut app_vec: Vec<_> = app_counts.into_iter().collect();
-            app_vec.sort_by(|a, b| b.1.cmp(&a.1));
-            
-            // Generate appropriate response based on query type
-            if is_key_query {
-                // Format keys response
-                let mut response = String::new();
-                for (i, (key, count)) in key_vec.iter().take(10).enumerate() {
-                    response.push_str(&format!("{}. {} ({} times)\n", i+1, key, count));
-                }
-                
-                result.push_str(&format!(
-                    "• {}: Most frequently used keys:\n{} ({} events)\n",
-                    time_str,
-                    response,
-                    s.events.len()
-                ));
-            } else if is_app_query {
-                // Format apps response
-                let mut response = String::new();
-                for (i, (app, count)) in app_vec.iter().take(5).enumerate() {
-                    response.push_str(&format!("{}. {} ({} events)\n", i+1, app, count));
-                }
-                
-                result.push_str(&format!(
-                    "• {}: Most frequently used applications:\n{} ({} events)\n",
-                    time_str,
-                    response,
-                    s.events.len()
-                ));
-            }
-        } else {
-            // For regular activity queries, use the description from the summary
-            // Get apps for context without showing detailed stats
-            let mut app_counts = std::collections::HashMap::new();
-            for event in &s.events {
-                let app_name = if event.app_context.app_name.contains("ghostty") {
-                    "Terminal".to_string()
-                } else if event.app_context.app_name.contains("firefox") {
-                    "Firefox".to_string()
-                } else {
-                    event.app_context.app_name.clone()
-                };
-                
-                *app_counts.entry(app_name).or_insert(0) += 1;
-            }
-            
-            let mut app_vec: Vec<_> = app_counts.into_iter().collect();
-            app_vec.sort_by(|a, b| b.1.cmp(&a.1));
-            
-            let apps: Vec<String> = app_vec.iter()
-                .take(2)
-                .map(|(name, _)| name.clone())
-                .collect();
-            
-            let apps_str = if !apps.is_empty() {
-                format!(" in {}", apps.join(" and "))
-            } else {
-                String::new()
-            };
-            
-            // Clean up the description to remove any code-related content
-            let description = s.description.lines()
-                .take(3)
-                .filter(|line| !line.contains("```") && 
-                             !line.contains("script") && 
-                             !line.contains("parse") && 
-                             !line.contains("code") && 
-                             !line.contains("example") &&
-                             !line.contains("analyze this data"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            
-            result.push_str(&format!(
-                "• {}: {}{} ({} events)\n",
-                time_str,
-                description,
-                apps_str,
-                s.events.len()
-            ));
+        // Count apps
+        let mut app_counts: HashMap<String, usize> = HashMap::new();
+        for event in &summary.events {
+            let app_name = &event.app_context.app_name;
+            *app_counts.entry(app_name.clone()).or_insert(0) += 1;
+        }
+        
+        // Get top apps
+        let mut app_list: Vec<_> = app_counts.into_iter().collect();
+        app_list.sort_by(|a, b| b.1.cmp(&a.1));
+        let top_apps: Vec<_> = app_list.iter()
+            .take(3)
+            .map(|(name, count)| format!("{} ({} events)", name, count))
+            .collect();
+        
+        // Add summary to result
+        result.push_str(&format!(
+            "## Activity Period: {}\n\n",
+            time_str
+        ));
+        
+        result.push_str(&format!(
+            "**Description**: {}\n\n",
+            summary.description
+        ));
+        
+        result.push_str(&format!(
+            "**Top Applications**: {}\n\n",
+            top_apps.join(", ")
+        ));
+        
+        result.push_str(&format!(
+            "**Tags**: {}\n\n",
+            summary.tags.join(", ")
+        ));
+        
+        result.push_str(&format!(
+            "**Event Count**: {} events\n\n",
+            summary.events.len()
+        ));
+        
+        result.push_str("---\n\n");
+    }
+    
+    result
+}
+
+/// Prepare events data for LLM processing
+fn prepare_events_for_llm(events: &[UserEvent]) -> String {
+    if events.is_empty() {
+        return "No events found.".to_string();
+    }
+    
+    let mut result = String::new();
+    
+    // Time range
+    let start_time = events.iter().map(|e| e.timestamp).min().unwrap_or(Utc::now());
+    let end_time = events.iter().map(|e| e.timestamp).max().unwrap_or(Utc::now());
+    
+    result.push_str(&format!(
+        "## Time Range: {} to {}\n\n",
+        start_time.format("%H:%M"),
+        end_time.format("%H:%M")
+    ));
+    
+    // Count apps
+    let mut app_counts: HashMap<String, usize> = HashMap::new();
+    for event in events {
+        let app_name = &event.app_context.app_name;
+        *app_counts.entry(app_name.clone()).or_insert(0) += 1;
+    }
+    
+    // Get top apps
+    let mut app_list: Vec<_> = app_counts.into_iter().collect();
+    app_list.sort_by(|a, b| b.1.cmp(&a.1));
+    
+    result.push_str("## Application Usage\n\n");
+    result.push_str("| Application | Event Count |\n");
+    result.push_str("|-------------|-------------|\n");
+    
+    for (app, count) in app_list.iter().take(5) {
+        result.push_str(&format!("| {} | {} |\n", app, count));
+    }
+    
+    result.push_str("\n");
+    
+    // Count event types
+    let mut event_type_counts: HashMap<String, usize> = HashMap::new();
+    for event in events {
+        *event_type_counts.entry(event.event.clone()).or_insert(0) += 1;
+    }
+    
+    result.push_str("## Event Types\n\n");
+    result.push_str("| Event Type | Count |\n");
+    result.push_str("|------------|-------|\n");
+    
+    for (event_type, count) in event_type_counts.iter() {
+        result.push_str(&format!("| {} | {} |\n", event_type, count));
+    }
+    
+    result.push_str("\n");
+    
+    // Sample of unique window titles
+    let mut window_titles: HashSet<String> = HashSet::new();
+    for event in events.iter().take(100) { // Limit to first 100 events
+        window_titles.insert(event.app_context.window_title.clone());
+    }
+    
+    if !window_titles.is_empty() {
+        result.push_str("## Sample Window Titles\n\n");
+        for title in window_titles.iter().take(5) { // Limit to 5 titles
+            result.push_str(&format!("- {}\n", title));
         }
     }
     
     result
 }
 
-// Use LLM to create a more concise, structured summary in markdown table format
-async fn distill_with_ai(raw_summary: &str, query: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let llm_client = llm::create_default_client().await?;
-    
+/// Generate an AI response based on the data
+async fn generate_ai_response(
+    raw_data: &str,
+    timeframe: &str,
+    query: &str,
+    llm_client: &Arc<Mutex<Box<dyn LlmClient + Send + Sync>>>,
+) -> Result<String, Box<dyn Error + Send + Sync>> {
     let prompt = format!(
-        "I have user activity data that answers the query: '{}'. Here is the raw data:\n\n{}\n\n
-        Create a concise, clearly formatted response with the following structure:
+        "You are Fishy, a helpful second brain assistant with a fun, aquatic personality. 
+        Create a concise, informative response to the user's query about their activities during {}.
         
-        1. A brief 1-2 sentence summary of what the user was doing
-        2. A well-formatted markdown table summarizing the key information
-        3. Any notable patterns or insights (optional, only if clear from the data)
+        USER QUERY: \"{}\"
         
-        For the markdown table:
-        - Format with proper | --- | syntax for headers
-        - Choose appropriate columns based on the data type
-        - For key/app frequency queries: use columns like Rank, Item, Count
-        - For activity queries: use columns like Time, Activity, Apps
-        - Limit to 5-7 rows maximum to keep it readable
+        Here is the raw activity data:
         
-        Keep the entire response concise and visually clean.",
-        query, raw_summary
+        {}
+        
+        Please format your response as follows:
+        1. A brief 1-2 sentence natural summary of what the user was doing
+        2. A markdown table with the most relevant information (app usage, activity types, etc.)
+        3. 1-2 brief insights or patterns you notice (optional)
+        
+        Keep your entire response under 15 lines for readability.
+        Make the markdown table neat and properly formatted with column headers.
+        DO NOT start with \"Fishy says\" as that will be added separately.
+        DO NOT add excessive newlines or ASCII art.
+        DO NOT use any prefix like 'Here's what I found:' - just start directly with the summary.",
+        timeframe, query, raw_data
     );
-
-    let response = llm_client.generate_text(&prompt).await?;
+    
+    // Get a lock on the LLM client
+    let client = llm_client.lock().await;
+    
+    // Generate the response
+    let response = client.generate_text(&prompt).await?;
+    
     Ok(response)
+}
+
+/// Simple formatter for summaries (fallback if AI fails)
+fn format_summaries_simple(
+    summaries: &[activity_tracker_common::ActivitySummary],
+    timeframe: &str,
+) -> String {
+    let mut result = format!("Here's what I found for {}:\n\n", timeframe);
+    
+    for (i, summary) in summaries.iter().enumerate() {
+        let time_range = format!("{} to {}", 
+            summary.start_time.format("%H:%M"),
+            summary.end_time.format("%H:%M"));
+            
+        result.push_str(&format!(
+            "{}. {} - {} ({} events)\n",
+            i + 1,
+            time_range,
+            summary.description.lines().next().unwrap_or("Activity"),
+            summary.events.len()
+        ));
+    }
+    
+    result
+}
+
+/// Simple formatter for events (fallback if AI fails)
+fn format_events_simple(
+    events: &[UserEvent],
+    timeframe: &str,
+) -> String {
+    let mut result = format!("Here's what I found for {}:\n\n", timeframe);
+    
+    // Count apps
+    let mut app_counts: HashMap<String, usize> = HashMap::new();
+    for event in events {
+        let app_name = &event.app_context.app_name;
+        *app_counts.entry(app_name.clone()).or_insert(0) += 1;
+    }
+    
+    // Get top apps
+    let mut app_list: Vec<_> = app_counts.into_iter().collect();
+    app_list.sort_by(|a, b| b.1.cmp(&a.1));
+    
+    result.push_str("Top applications used:\n");
+    for (i, (app, count)) in app_list.iter().take(3).enumerate() {
+        result.push_str(&format!("{}. {} ({} events)\n", i + 1, app, count));
+    }
+    
+    result.push_str(&format!("\nTotal events found: {}", events.len()));
+    
+    result
 }
