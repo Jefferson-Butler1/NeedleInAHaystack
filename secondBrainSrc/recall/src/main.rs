@@ -1,5 +1,7 @@
 use activity_tracker_common::{
     db::GeneralDbClient,
+    llm,
+    llm::LlmClient,
     ActivitySummary,
 };
 use dotenv::dotenv;
@@ -15,7 +17,7 @@ use fuzzy_finder::FuzzyFinder;
 use query_engine::QueryEngine;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Load environment variables
     dotenv().ok();
 
@@ -69,36 +71,69 @@ async fn handle_client(
     // Convert bytes to string
     let query = String::from_utf8_lossy(&buffer[..n]).to_string();
 
-    // Process the query and immediately convert to a response string
-    let response = if query.starts_with("Fuzzy:") {
-        let search_term = &query[6..];
-        match fuzzy_finder.search(search_term).await {
-            Ok(summaries) => format_summaries(summaries, &query),
-            Err(e) => format!("Error in fuzzy search: {}", e),
-        }
-    } else {
-        match query_engine.process_query(&query).await {
-            Ok(summaries) => format_summaries(summaries, &query),
-            Err(e) => format!("Error in query: {}", e),
-        }
-    };
-
+    // Process the query and generate a response string
+    let response = process_query(&query, &query_engine, &fuzzy_finder).await;
     let _ = socket.write_all(response.as_bytes()).await;
 }
 
-fn format_summaries(summaries: Vec<ActivitySummary>, query: &str) -> String {
+// Process the query and generate a response
+async fn process_query(
+    query: &str, 
+    query_engine: &QueryEngine, 
+    fuzzy_finder: &FuzzyFinder
+) -> String {
+    if query.starts_with("Fuzzy:") {
+        let search_term = &query[6..];
+        match fuzzy_finder.search(search_term).await {
+            Ok(summaries) => {
+                let result = format_summaries_with_ai(summaries, query).await;
+                result
+            },
+            Err(e) => format!("Error in fuzzy search: {}", e),
+        }
+    } else {
+        match query_engine.process_query(query).await {
+            Ok(summaries) => {
+                let result = format_summaries_with_ai(summaries, query).await;
+                result
+            },
+            Err(e) => format!("Error in query: {}", e),
+        }
+    }
+}
+
+// New function that adds AI distillation before formatting
+async fn format_summaries_with_ai(summaries: Vec<ActivitySummary>, query: &str) -> String {
     if summaries.is_empty() {
         return "Fishy says: I don't remember anything matching that query.".to_string();
     }
 
-    let mut result = String::from("Fishy says:\n");
+    // Prepare summaries data for AI processing
+    let raw_summary = format_summaries_raw(summaries, query);
+    
+    // Use LLM to create a markdown table summary
+    match distill_with_ai(&raw_summary, query).await {
+        Ok(ai_summary) => {
+            format!("Fishy says:\n\n{}", ai_summary)
+        }
+        Err(e) => {
+            eprintln!("Error with AI distillation: {}", e);
+            // Fall back to regular formatting if AI fails
+            format!("Fishy says:\n{}", raw_summary)
+        }
+    }
+}
+
+// Helper function to generate raw summaries for AI processing
+fn format_summaries_raw(summaries: Vec<ActivitySummary>, query: &str) -> String {
+    let mut result = String::new();
     
     // Identify query type
     let query_lower = query.to_lowercase();
     let is_key_query = query_lower.contains("key") && 
-                      (query_lower.contains("most") || query_lower.contains("frequent"));
+                     (query_lower.contains("most") || query_lower.contains("frequent"));
     let is_app_query = (query_lower.contains("app") || query_lower.contains("application")) && 
-                       (query_lower.contains("most") || query_lower.contains("frequent"));
+                      (query_lower.contains("most") || query_lower.contains("frequent"));
     
     for s in summaries {
         // Format the time
@@ -200,11 +235,11 @@ fn format_summaries(summaries: Vec<ActivitySummary>, query: &str) -> String {
             let description = s.description.lines()
                 .take(3)
                 .filter(|line| !line.contains("```") && 
-                              !line.contains("script") && 
-                              !line.contains("parse") && 
-                              !line.contains("code") && 
-                              !line.contains("example") &&
-                              !line.contains("analyze this data"))
+                             !line.contains("script") && 
+                             !line.contains("parse") && 
+                             !line.contains("code") && 
+                             !line.contains("example") &&
+                             !line.contains("analyze this data"))
                 .collect::<Vec<_>>()
                 .join("\n");
             
@@ -219,4 +254,31 @@ fn format_summaries(summaries: Vec<ActivitySummary>, query: &str) -> String {
     }
     
     result
+}
+
+// Use LLM to create a more concise, structured summary in markdown table format
+async fn distill_with_ai(raw_summary: &str, query: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let llm_client = llm::create_default_client().await?;
+    
+    let prompt = format!(
+        "I have user activity data that answers the query: '{}'. Here is the raw data:\n\n{}\n\n
+        Create a concise, clearly formatted response with the following structure:
+        
+        1. A brief 1-2 sentence summary of what the user was doing
+        2. A well-formatted markdown table summarizing the key information
+        3. Any notable patterns or insights (optional, only if clear from the data)
+        
+        For the markdown table:
+        - Format with proper | --- | syntax for headers
+        - Choose appropriate columns based on the data type
+        - For key/app frequency queries: use columns like Rank, Item, Count
+        - For activity queries: use columns like Time, Activity, Apps
+        - Limit to 5-7 rows maximum to keep it readable
+        
+        Keep the entire response concise and visually clean.",
+        query, raw_summary
+    );
+
+    let response = llm_client.generate_text(&prompt).await?;
+    Ok(response)
 }

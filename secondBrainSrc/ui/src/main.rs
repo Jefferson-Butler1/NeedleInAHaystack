@@ -185,7 +185,7 @@ fn run_app() -> Result<()> {
 
 fn main() -> Result<()> {
     if let Err(err) = run_app() {
-        println!("Error: {:?}", err);
+        eprintln!("Error: {:?}", err);
     }
     Ok(())
 }

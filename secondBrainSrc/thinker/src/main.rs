@@ -12,7 +12,7 @@ mod event_analyzer;
 use event_analyzer::EventAnalyzer;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Load environment variables
     dotenv().ok();
     

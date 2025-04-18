@@ -7,13 +7,13 @@ use std::path::Path;
 
 #[async_trait]
 pub trait SummaryStore {
-    async fn store_summary(&self, summary: &ActivitySummary) -> Result<(), Box<dyn Error>>;
+    async fn store_summary(&self, summary: &ActivitySummary) -> Result<(), Box<dyn Error + Send + Sync>>;
     async fn get_summaries_in_timeframe(
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<ActivitySummary>, Box<dyn Error>>;
-    async fn search_summaries(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error>>;
+    ) -> Result<Vec<ActivitySummary>, Box<dyn Error + Send + Sync>>;
+    async fn search_summaries(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error + Send + Sync>>;
 }
 
 #[derive(Clone)]
@@ -22,7 +22,7 @@ pub struct GeneralDbClient {
 }
 
 impl GeneralDbClient {
-    pub async fn new(connection_string: &str) -> Result<Self, Box<dyn Error>> {
+    pub async fn new(connection_string: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         // If the connection string is a file path, ensure the directory exists
         if connection_string.starts_with("sqlite:") {
             let path = connection_string.trim_start_matches("sqlite:");
@@ -95,8 +95,8 @@ impl GeneralDbClient {
         Ok(client)
     }
     
-    async fn ensure_schema(&self) -> Result<(), Box<dyn Error>> {
-        // Create tables if they don't exist
+    async fn ensure_schema(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Create activity_summaries table if it doesn't exist
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS activity_summaries (
@@ -116,6 +116,23 @@ impl GeneralDbClient {
         .execute(&self.pool)
         .await?;
         
+        // Check if summary_search table exists for FTS
+        let result = sqlx::query("SELECT name FROM sqlite_master WHERE type='table' AND name='summary_search'")
+            .fetch_optional(&self.pool)
+            .await?;
+            
+        if result.is_none() {
+            // Create the virtual FTS table for searching
+            sqlx::query(
+                r#"
+                CREATE VIRTUAL TABLE IF NOT EXISTS summary_search
+                USING FTS5(description, tags);
+                "#
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+        
         Ok(())
     }
     
@@ -127,7 +144,7 @@ impl GeneralDbClient {
         description: String,
         tags_json: String,
         events_json: String,
-    ) -> Result<ActivitySummary, Box<dyn Error>> {
+    ) -> Result<ActivitySummary, Box<dyn Error + Send + Sync>> {
         let tags: Vec<String> = serde_json::from_str(&tags_json)?;
         let events = serde_json::from_str(&events_json)?;
         
@@ -143,7 +160,7 @@ impl GeneralDbClient {
 
 #[async_trait]
 impl SummaryStore for GeneralDbClient {
-    async fn store_summary(&self, summary: &ActivitySummary) -> Result<(), Box<dyn Error>> {
+    async fn store_summary(&self, summary: &ActivitySummary) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Convert summary to DB representation
         let tags_json = serde_json::to_string(&summary.tags)?;
         let events_json = serde_json::to_string(&summary.events)?;
@@ -192,7 +209,7 @@ impl SummaryStore for GeneralDbClient {
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<ActivitySummary>, Box<dyn Error>> {
+    ) -> Result<Vec<ActivitySummary>, Box<dyn Error + Send + Sync>> {
         let rows = sqlx::query(
             r#"
             SELECT id, start_time, end_time, description, tags, events_json
@@ -233,7 +250,7 @@ impl SummaryStore for GeneralDbClient {
         Ok(summaries)
     }
 
-    async fn search_summaries(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error>> {
+    async fn search_summaries(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error + Send + Sync>> {
         // Simple approach: search for each word with LIKE
         let search_terms = query.split_whitespace()
             .filter(|term| !term.is_empty())

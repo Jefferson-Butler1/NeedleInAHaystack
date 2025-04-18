@@ -15,7 +15,7 @@ impl QueryEngine {
         Self { db_client }
     }
 
-    pub async fn process_query(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error>> {
+    pub async fn process_query(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error + Send + Sync>> {
         // If it's a time-based query, handle it directly
         if let Some(time_range) = self.parse_time_query(query) {
             return self.db_client.get_summaries_in_timeframe(time_range.0, time_range.1).await;

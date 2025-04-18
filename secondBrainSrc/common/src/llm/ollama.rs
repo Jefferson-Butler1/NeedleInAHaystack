@@ -42,7 +42,7 @@ struct GenerateResponse {
 }
 
 impl OllamaClient {
-    pub async fn new(model: &str) -> Result<Self, Box<dyn Error>> {
+    pub async fn new(model: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let client = Client::builder().timeout(Duration::from_secs(180)).build()?;
 
         let base_url =
@@ -58,7 +58,7 @@ impl OllamaClient {
         Ok(ollama)
     }
 
-    async fn check_model(&self) -> Result<(), Box<dyn Error>> {
+    async fn check_model(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let url = format!("{}/api/show", self.base_url);
 
         let response = self
@@ -82,9 +82,8 @@ impl OllamaClient {
 
 #[async_trait]
 impl LlmClient for OllamaClient {
-    async fn generate_text(&self, prompt: &str) -> Result<String, Box<dyn Error>> {
+    async fn generate_text(&self, prompt: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
         let url = format!("{}/api/generate", self.base_url);
-        // println!("{}/api/generate", self.base_url);
 
         let request = GenerateRequest {
             model: self.model.clone(),
@@ -110,7 +109,7 @@ impl LlmClient for OllamaClient {
         Ok(response.response.trim().to_string())
     }
 
-    async fn extract_tags(&self, text: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    async fn extract_tags(&self, text: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
         let prompt = format!(
             "Extract 3-5 key tags or topics from this activity description. Return each tag on a new line, without numbering or bullet points:\n\n{}",
             text

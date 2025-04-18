@@ -16,7 +16,7 @@ const DEFAULT_POLL_INTERVAL: u64 = 1;
 const STATS_INTERVAL: u64 = 60; // Print stats every 60 seconds
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Load environment variables from .env file if present
     dotenv().ok();
 

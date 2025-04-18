@@ -14,7 +14,7 @@ impl FuzzyFinder {
         Self { db_client }
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error>> {
+    pub async fn search(&self, query: &str) -> Result<Vec<ActivitySummary>, Box<dyn Error + Send + Sync>> {
         // @todo this would implement fuzzy finding logic
         self.db_client.search_summaries(query).await
     }

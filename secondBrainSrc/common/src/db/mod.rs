@@ -9,12 +9,12 @@ pub use general_db::*;
 
 #[async_trait]
 pub trait EventStore {
-    async fn store_event(&self, event: UserEvent) -> Result<(), Box<dyn Error>>;
+    async fn store_event(&self, event: UserEvent) -> Result<(), Box<dyn Error + Send + Sync>>;
     async fn get_events_in_timeframe(
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<UserEvent>, Box<dyn Error>>;
+    ) -> Result<Vec<UserEvent>, Box<dyn Error + Send + Sync>>;
 }
 
 pub struct TimescaleClient {
@@ -22,7 +22,7 @@ pub struct TimescaleClient {
 }
 
 impl TimescaleClient {
-    pub async fn new(connection_string: &str) -> Result<Self, Box<dyn Error>> {
+    pub async fn new(connection_string: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         println!("Connecting to database: {}", connection_string);
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(5)
@@ -54,7 +54,7 @@ impl TimescaleClient {
     }
     
     // Create the necessary tables if they don't exist
-    async fn ensure_tables_exist(&self) -> Result<(), Box<dyn Error>> {
+    async fn ensure_tables_exist(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Create the user_events table if it doesn't exist
         sqlx::query(
             r#"
@@ -87,7 +87,7 @@ impl TimescaleClient {
 
 #[async_trait]
 impl EventStore for TimescaleClient {
-    async fn store_event(&self, event: UserEvent) -> Result<(), Box<dyn Error>> {
+    async fn store_event(&self, event: UserEvent) -> Result<(), Box<dyn Error + Send + Sync>> {
         // First, check if the events table exists, create it if it doesn't
         self.ensure_tables_exist().await?;
         
@@ -113,7 +113,7 @@ impl EventStore for TimescaleClient {
         &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
-    ) -> Result<Vec<UserEvent>, Box<dyn Error>> {
+    ) -> Result<Vec<UserEvent>, Box<dyn Error + Send + Sync>> {
         // Query events within the timeframe using regular query to avoid compile-time checks
         let rows = sqlx::query(
             r#"

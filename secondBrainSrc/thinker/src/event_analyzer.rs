@@ -16,7 +16,7 @@ impl<T: LlmClient> EventAnalyzer<T> {
         events: Vec<UserEvent>,
         start_time: DateTime<Utc>,
         end_time: DateTime<Utc>,
-    ) -> Result<ActivitySummary, Box<dyn Error>> {
+    ) -> Result<ActivitySummary, Box<dyn Error + Send + Sync>> {
         // Extract key information from events for better analysis
         let mut app_count = std::collections::HashMap::new();
         let mut key_count = std::collections::HashMap::new();
@@ -43,7 +43,7 @@ impl<T: LlmClient> EventAnalyzer<T> {
         let top_keys = key_vec.into_iter().take(5).map(|(key, count)| format!("{} ({})", key, count)).collect::<Vec<_>>();
         
         // Create a rich data summary containing stats for different query types
-        let stats_summary = format!(
+        let _stats_summary = format!(
             "Session statistics:\n\
              - Time period: {} to {}\n\
              - Total events: {}\n\
@@ -82,7 +82,7 @@ impl<T: LlmClient> EventAnalyzer<T> {
         })
     }
 
-    async fn extract_tags(&self, description: &str) -> Result<Vec<String>, Box<dyn Error>> {
+    async fn extract_tags(&self, description: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
         let prompt = format!(
             "Extract 3-5 tags or topics from this activity description: \n\n{}",
             description
