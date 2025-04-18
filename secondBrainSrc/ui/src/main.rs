@@ -34,7 +34,7 @@ impl App {
         }
 
         // Connect to the recall module's TCP server
-        match TcpStream::connect("localhost:8080") {
+        match TcpStream::connect("127.0.0.1:8080") {
             Ok(mut stream) => {
                 // Send the query
                 stream.write_all(self.input.as_bytes())?;
@@ -44,7 +44,11 @@ impl App {
                 let mut buffer = [0; 4096];
                 match stream.read(&mut buffer) {
                     Ok(size) => {
-                        self.response = String::from_utf8_lossy(&buffer[..size]).to_string();
+                        if size > 0 {
+                            self.response = String::from_utf8_lossy(&buffer[..size]).to_string();
+                        } else {
+                            self.response = "Received empty response from server".to_string();
+                        }
                     }
                     Err(e) => {
                         self.response = format!("Error reading response: {}", e);
