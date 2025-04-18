@@ -84,7 +84,7 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     // Response area with markdown rendering
     let rendered_text = render_markdown(&app.response);
-    
+
     let response_widget = Paragraph::new(rendered_text)
         .block(Block::default().borders(Borders::ALL).title("Summary"))
         .scroll((app.scroll, 0));
@@ -117,7 +117,7 @@ fn render_markdown(text: &str) -> Vec<Line> {
     let mut table_alignments = Vec::new();
     let mut table_column_widths = Vec::new();
     let mut table_rows = Vec::new();
-    
+
     // Process markdown line by line
     for line in text.lines() {
         if line.trim().starts_with('|') && line.trim().ends_with('|') {
@@ -129,17 +129,18 @@ fn render_markdown(text: &str) -> Vec<Line> {
                 table_alignments.clear();
                 table_column_widths.clear();
             }
-            
+
             let row = line.trim();
-            
+
             // Parse header separator to determine column alignments
             if row.contains("---") {
                 // This is the header separator defining alignments
-                let cols = row.split('|')
+                let cols = row
+                    .split('|')
                     .filter(|s| !s.is_empty())
                     .map(|s| s.trim())
                     .collect::<Vec<_>>();
-                
+
                 for col in cols {
                     if col.starts_with(':') && col.ends_with(':') {
                         // Center aligned
@@ -154,11 +155,12 @@ fn render_markdown(text: &str) -> Vec<Line> {
                 }
             } else {
                 // This is a data row
-                let cells = row.split('|')
+                let cells = row
+                    .split('|')
                     .filter(|s| !s.is_empty())
                     .map(|s| s.trim().to_string())
                     .collect::<Vec<_>>();
-                
+
                 // Update column widths
                 if table_column_widths.is_empty() {
                     // Initialize column widths
@@ -173,85 +175,87 @@ fn render_markdown(text: &str) -> Vec<Line> {
                         }
                     }
                 }
-                
+
                 table_rows.push(cells);
             }
         } else if in_table {
             // End of table - render it
             in_table = false;
-            
+
             // Apply alignments and padding to make the table look nice
             for row in &table_rows {
                 let mut line_spans = Vec::new();
-                
+
                 for (i, cell) in row.iter().enumerate() {
                     if i >= table_column_widths.len() {
                         continue;
                     }
-                    
+
                     let width = table_column_widths[i];
-                    let alignment = if i < table_alignments.len() { table_alignments[i] } else { Alignment::Left };
+                    let alignment = if i < table_alignments.len() {
+                        table_alignments[i]
+                    } else {
+                        Alignment::Left
+                    };
                     let styled_cell = match alignment {
                         Alignment::Left => format!("{:<width$}", cell, width = width),
                         Alignment::Center => format!("{:^width$}", cell, width = width),
                         Alignment::Right => format!("{:>width$}", cell, width = width),
                     };
-                    
+
                     let style = if i == 0 || table_rows.first() == Some(row) {
                         // First column or header row - make it bold
                         Style::default().add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     };
-                    
+
                     line_spans.push(Span::styled(styled_cell, style));
                     line_spans.push(Span::raw(" | "));
                 }
-                
+
                 // Remove the last separator
                 if !line_spans.is_empty() {
                     line_spans.pop();
                 }
-                
+
                 result.push(Line::from(line_spans));
             }
-            
+
             // Add an empty line after table
             result.push(Line::from(""));
-            
+
             // Process current line
             result.push(Line::from(line.to_string()));
         } else {
             // Regular text - add formatting for headers, bold, etc.
             if line.starts_with("# ") {
                 // H1 header
-                result.push(Line::from(vec![
-                    Span::styled(
-                        line[2..].to_string(), 
-                        Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow)
-                    )
-                ]));
+                result.push(Line::from(vec![Span::styled(
+                    line[2..].to_string(),
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(Color::Yellow),
+                )]));
             } else if line.starts_with("## ") {
                 // H2 header
-                result.push(Line::from(vec![
-                    Span::styled(
-                        line[3..].to_string(), 
-                        Style::default().add_modifier(Modifier::BOLD).fg(Color::Blue)
-                    )
-                ]));
+                result.push(Line::from(vec![Span::styled(
+                    line[3..].to_string(),
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(Color::Blue),
+                )]));
             } else if line.starts_with("### ") {
                 // H3 header
-                result.push(Line::from(vec![
-                    Span::styled(
-                        line[4..].to_string(), 
-                        Style::default().add_modifier(Modifier::BOLD)
-                    )
-                ]));
+                result.push(Line::from(vec![Span::styled(
+                    line[4..].to_string(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]));
             } else if line.starts_with("- ") {
                 // Bullet point
                 result.push(Line::from(vec![
                     Span::raw("• "),
-                    Span::raw(line[2..].to_string())
+                    Span::raw(line[2..].to_string()),
                 ]));
             } else {
                 // Regular text
@@ -259,46 +263,50 @@ fn render_markdown(text: &str) -> Vec<Line> {
             }
         }
     }
-    
+
     // Handle case where table is at the end of text
     if in_table {
         // Render the final table
         for row in &table_rows {
             let mut line_spans = Vec::new();
-            
+
             for (i, cell) in row.iter().enumerate() {
                 if i >= table_column_widths.len() {
                     continue;
                 }
-                
+
                 let width = table_column_widths[i];
-                let alignment = if i < table_alignments.len() { table_alignments[i] } else { Alignment::Left };
+                let alignment = if i < table_alignments.len() {
+                    table_alignments[i]
+                } else {
+                    Alignment::Left
+                };
                 let styled_cell = match alignment {
                     Alignment::Left => format!("{:<width$}", cell, width = width),
                     Alignment::Center => format!("{:^width$}", cell, width = width),
                     Alignment::Right => format!("{:>width$}", cell, width = width),
                 };
-                
+
                 let style = if i == 0 || table_rows.first() == Some(row) {
                     // First column or header row - make it bold
                     Style::default().add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
-                
+
                 line_spans.push(Span::styled(styled_cell, style));
                 line_spans.push(Span::raw(" | "));
             }
-            
+
             // Remove the last separator
             if !line_spans.is_empty() {
                 line_spans.pop();
             }
-            
+
             result.push(Line::from(line_spans));
         }
     }
-    
+
     result
 }
 
@@ -321,7 +329,7 @@ fn run_app() -> Result<()> {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         // Exit
-                        KeyCode::Char('q')
+                        KeyCode::Char('c')
                             if key
                                 .modifiers
                                 .contains(crossterm::event::KeyModifiers::CONTROL) =>
@@ -389,3 +397,4 @@ fn main() -> Result<()> {
 
 // Required for crossterm
 use std::io::Read;
+
