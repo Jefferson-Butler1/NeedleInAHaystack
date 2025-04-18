@@ -1,22 +1,23 @@
 use activity_tracker_common::{
     ActivitySummary, UserEvent,
-    db::{GeneralDbClient, SummaryStore, EventStore}
+    db::{GeneralDbClient, EventStore, TimescaleClient}
 };
 use chrono::{DateTime, Datelike, Duration, Local, NaiveTime, TimeZone, Timelike, Utc};
+use sqlx::{Pool, PgPool, Row, Postgres, postgres::PgRow};
 use std::error::Error;
 use std::sync::Arc;
 
 /// QueryEngine is responsible for processing user queries and retrieving relevant data
 #[derive(Clone)]
 pub struct QueryEngine {
-    summary_db: GeneralDbClient,
-    event_db: Option<Arc<activity_tracker_common::db::TimescaleClient>>,
+    pg_pool: Arc<Pool<Postgres>>,
+    event_db: Option<Arc<TimescaleClient>>,
 }
 
 impl QueryEngine {
-    pub fn new(summary_db: GeneralDbClient, event_db: Option<Arc<activity_tracker_common::db::TimescaleClient>>) -> Self {
+    pub fn new(pg_pool: Arc<Pool<Postgres>>, event_db: Option<Arc<TimescaleClient>>) -> Self {
         Self { 
-            summary_db,
+            pg_pool,
             event_db
         }
     }
@@ -26,8 +27,8 @@ impl QueryEngine {
         // Parse the timeframe from the query
         let timeframe = self.parse_timeframe(query);
         
-        // Try to get summaries for the timeframe
-        let summaries = self.summary_db.get_summaries_in_timeframe(timeframe.start, timeframe.end).await?;
+        // Try to get summaries for the timeframe from PostgreSQL
+        let summaries = self.get_summaries_in_timeframe(timeframe.start, timeframe.end).await?;
         
         if !summaries.is_empty() {
             // We found summaries, return them
@@ -53,7 +54,7 @@ impl QueryEngine {
         
         // If we still don't have results, try to search summaries by content
         let clean_query = self.sanitize_query_for_search(query);
-        let summaries = self.summary_db.search_summaries(&clean_query).await?;
+        let summaries = self.search_summaries(&clean_query).await?;
         
         if !summaries.is_empty() {
             return Ok(QueryResult::Summaries {
@@ -68,6 +69,127 @@ impl QueryEngine {
             timeframe,
             query: query.to_string(),
         })
+    }
+    
+    /// Get summaries within a specific timeframe from PostgreSQL
+    async fn get_summaries_in_timeframe(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<ActivitySummary>, Box<dyn Error + Send + Sync>> {
+        // Query summaries from PostgreSQL user_summaries table
+        let rows = sqlx::query(
+            r#"
+            SELECT 
+                id, start_time, end_time, description, tags, 
+                keystrokes, created_at
+            FROM 
+                user_summaries
+            WHERE 
+                (start_time BETWEEN $1 AND $2) OR
+                (end_time BETWEEN $1 AND $2) OR
+                (start_time <= $1 AND end_time >= $2)
+            ORDER BY 
+                start_time DESC
+            "#
+        )
+        .bind(start)
+        .bind(end)
+        .fetch_all(&*self.pg_pool)
+        .await?;
+        
+        let mut summaries = Vec::with_capacity(rows.len());
+        
+        for row in rows {
+            let summary = self.parse_summary_from_row(row)?;
+            summaries.push(summary);
+        }
+        
+        Ok(summaries)
+    }
+    
+    /// Search summaries by content in PostgreSQL
+    async fn search_summaries(
+        &self,
+        search_term: &str,
+    ) -> Result<Vec<ActivitySummary>, Box<dyn Error + Send + Sync>> {
+        // Query summaries from PostgreSQL by searching description
+        let search_pattern = format!("%{}%", search_term);
+        
+        let rows = sqlx::query(
+            r#"
+            SELECT 
+                id, start_time, end_time, description, tags, 
+                keystrokes, created_at
+            FROM 
+                user_summaries
+            WHERE 
+                description ILIKE $1
+            ORDER BY 
+                start_time DESC
+            LIMIT 10
+            "#
+        )
+        .bind(search_pattern)
+        .fetch_all(&*self.pg_pool)
+        .await?;
+        
+        let mut summaries = Vec::with_capacity(rows.len());
+        
+        for row in rows {
+            let summary = self.parse_summary_from_row(row)?;
+            summaries.push(summary);
+        }
+        
+        Ok(summaries)
+    }
+    
+    /// Parse a summary from a PostgreSQL row
+    fn parse_summary_from_row(
+        &self,
+        row: PgRow,
+    ) -> Result<ActivitySummary, Box<dyn Error + Send + Sync>> {
+        let id: i32 = row.try_get("id")?;
+        let start_time: DateTime<Utc> = row.try_get("start_time")?;
+        let end_time: DateTime<Utc> = row.try_get("end_time")?;
+        let description: String = row.try_get("description")?;
+        let tags: Vec<String> = row.try_get("tags")?;
+        let keystrokes: String = row.try_get("keystrokes")?;
+        
+        // For demonstration, create events from keystrokes
+        // In a real implementation, you would fetch events from the user_events table
+        let events = self.create_events_from_keystrokes(keystrokes, &start_time, &end_time)?;
+        
+        Ok(ActivitySummary {
+            start_time,
+            end_time,
+            description,
+            events,
+            tags,
+        })
+    }
+    
+    /// Create events from keystrokes string
+    /// This is a simple implementation - in production you'd query related events
+    fn create_events_from_keystrokes(
+        &self,
+        keystrokes: String,
+        start_time: &DateTime<Utc>,
+        end_time: &DateTime<Utc>,
+    ) -> Result<Vec<UserEvent>, Box<dyn Error + Send + Sync>> {
+        // For simplicity, create one event with the keystrokes data
+        let event = UserEvent {
+            timestamp: *start_time,
+            event: "keystroke_summary".to_string(),
+            data: keystrokes,
+            app_context: activity_tracker_common::AppContext {
+                app_name: "Summary".to_string(),
+                window_title: "Activity Summary".to_string(),
+                url: None,
+            },
+        };
+        
+        Ok(vec![event])
     }
 
     /// Sanitize and extract key terms from the query for FTS search

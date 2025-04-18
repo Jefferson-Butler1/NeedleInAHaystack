@@ -1,9 +1,10 @@
 use activity_tracker_common::{
-    db::{GeneralDbClient, TimescaleClient},
+    db::TimescaleClient,
     llm,
     llm::LlmClient,
     UserEvent,
 };
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use chrono::Utc;
 use dotenv::dotenv;
 use query_engine::{QueryEngine, QueryResult};
@@ -58,30 +59,32 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Load environment variables
     dotenv().ok();
 
-    // Get database URLs from environment
-    let summary_db_url = env::var("SUMMARY_DB_URL").unwrap_or_else(|_| "sqlite:./data/summaries.db".to_string());
-    let events_db_url = env::var("DATABASE_URL").ok();
+    // Get database URL from environment
+    let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5438/second_brain".to_string());
 
-    println!("🔌 Connecting to summary database...");
-    let summary_db = GeneralDbClient::new(&summary_db_url).await?;
-    println!("✅ Connected to summary database");
-
-    // Try to connect to the events database if provided
-    let events_db = if let Some(url) = events_db_url {
-        println!("🔌 Connecting to events database...");
-        match TimescaleClient::new(&url).await {
-            Ok(db) => {
-                println!("✅ Connected to events database");
-                Some(Arc::new(db))
-            }
-            Err(e) => {
-                println!("⚠️ Failed to connect to events database: {}", e);
-                None
-            }
+    println!("🔌 Connecting to PostgreSQL database...");
+    // Connect to PostgreSQL
+    let pg_pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
+        .await?;
+    
+    println!("✅ Connected to PostgreSQL database");
+    
+    // Create a shared reference to the PostgreSQL pool
+    let pg_pool = Arc::new(pg_pool);
+    
+    // Also connect to the events database (which is the same in this case)
+    println!("🔌 Setting up events database connection...");
+    let events_db = match TimescaleClient::new(&db_url).await {
+        Ok(db) => {
+            println!("✅ Events database connection established");
+            Some(Arc::new(db))
         }
-    } else {
-        println!("ℹ️ No events database URL provided, operating in summaries-only mode");
-        None
+        Err(e) => {
+            println!("⚠️ Failed to connect to events database: {}", e);
+            None
+        }
     };
 
     // Create LLM client
@@ -99,7 +102,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     };
 
-    let query_engine = QueryEngine::new(summary_db, events_db);
+    let query_engine = QueryEngine::new(pg_pool, events_db);
 
     // Setup TCP server
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
@@ -142,9 +145,9 @@ async fn handle_client(
 
     // Process the query
     let response = process_query(&query, &query_engine, &llm_client).await;
-    
+
     println!("✅ Sending response (length: {} chars)", response.len());
-    
+
     // Send the response back
     if let Err(e) = socket.write_all(response.as_bytes()).await {
         eprintln!("Error writing to socket: {}", e);
@@ -160,16 +163,25 @@ async fn process_query(
     // Process the query using our query engine
     match query_engine.process_query(query).await {
         Ok(result) => match result {
-            QueryResult::Summaries { summaries, timeframe, query } => {
-                format_summaries_with_ai(summaries, &timeframe.description, &query, llm_client).await
+            QueryResult::Summaries {
+                summaries,
+                timeframe,
+                query,
+            } => {
+                format_summaries_with_ai(summaries, &timeframe.description, &query, llm_client)
+                    .await
             }
-            QueryResult::Events { events, timeframe, query } => {
-                format_events_with_ai(events, &timeframe.description, &query, llm_client).await
-            }
+            QueryResult::Events {
+                events,
+                timeframe,
+                query,
+            } => format_events_with_ai(events, &timeframe.description, &query, llm_client).await,
             QueryResult::Empty { timeframe, .. } => {
-                format!("{}\n\nI don't have any data about what you did during {}.", 
+                format!(
+                    "{}\n\nI don't have any data about what you did during {}.",
                     random_fishy_no_data(),
-                    timeframe.description)
+                    timeframe.description
+                )
             }
         },
         Err(e) => {
@@ -192,7 +204,7 @@ async fn format_summaries_with_ai(
 
     // Prepare the raw data for the LLM
     let raw_data = prepare_summaries_for_llm(&summaries);
-    
+
     // Generate the AI response
     match generate_ai_response(&raw_data, timeframe, query, llm_client).await {
         Ok(ai_response) => {
@@ -220,7 +232,7 @@ async fn format_events_with_ai(
 
     // Prepare the raw data for the LLM
     let raw_data = prepare_events_for_llm(&events);
-    
+
     // Generate the AI response
     match generate_ai_response(&raw_data, timeframe, query, llm_client).await {
         Ok(ai_response) => {
@@ -238,57 +250,51 @@ async fn format_events_with_ai(
 /// Prepare summaries data for LLM processing
 fn prepare_summaries_for_llm(summaries: &[activity_tracker_common::ActivitySummary]) -> String {
     let mut result = String::new();
-    
+
     for summary in summaries {
         // Format time range
-        let time_str = format!("{} to {}", 
+        let time_str = format!(
+            "{} to {}",
             summary.start_time.format("%H:%M"),
-            summary.end_time.format("%H:%M"));
-        
+            summary.end_time.format("%H:%M")
+        );
+
         // Count apps
         let mut app_counts: HashMap<String, usize> = HashMap::new();
         for event in &summary.events {
             let app_name = &event.app_context.app_name;
             *app_counts.entry(app_name.clone()).or_insert(0) += 1;
         }
-        
+
         // Get top apps
         let mut app_list: Vec<_> = app_counts.into_iter().collect();
         app_list.sort_by(|a, b| b.1.cmp(&a.1));
-        let top_apps: Vec<_> = app_list.iter()
+        let top_apps: Vec<_> = app_list
+            .iter()
             .take(3)
             .map(|(name, count)| format!("{} ({} events)", name, count))
             .collect();
-        
+
         // Add summary to result
-        result.push_str(&format!(
-            "## Activity Period: {}\n\n",
-            time_str
-        ));
-        
-        result.push_str(&format!(
-            "**Description**: {}\n\n",
-            summary.description
-        ));
-        
+        result.push_str(&format!("## Activity Period: {}\n\n", time_str));
+
+        result.push_str(&format!("**Description**: {}\n\n", summary.description));
+
         result.push_str(&format!(
             "**Top Applications**: {}\n\n",
             top_apps.join(", ")
         ));
-        
-        result.push_str(&format!(
-            "**Tags**: {}\n\n",
-            summary.tags.join(", ")
-        ));
-        
+
+        result.push_str(&format!("**Tags**: {}\n\n", summary.tags.join(", ")));
+
         result.push_str(&format!(
             "**Event Count**: {} events\n\n",
             summary.events.len()
         ));
-        
+
         result.push_str("---\n\n");
     }
-    
+
     result
 }
 
@@ -297,69 +303,79 @@ fn prepare_events_for_llm(events: &[UserEvent]) -> String {
     if events.is_empty() {
         return "No events found.".to_string();
     }
-    
+
     let mut result = String::new();
-    
+
     // Time range
-    let start_time = events.iter().map(|e| e.timestamp).min().unwrap_or(Utc::now());
-    let end_time = events.iter().map(|e| e.timestamp).max().unwrap_or(Utc::now());
-    
+    let start_time = events
+        .iter()
+        .map(|e| e.timestamp)
+        .min()
+        .unwrap_or(Utc::now());
+    let end_time = events
+        .iter()
+        .map(|e| e.timestamp)
+        .max()
+        .unwrap_or(Utc::now());
+
     result.push_str(&format!(
         "## Time Range: {} to {}\n\n",
         start_time.format("%H:%M"),
         end_time.format("%H:%M")
     ));
-    
+
     // Count apps
     let mut app_counts: HashMap<String, usize> = HashMap::new();
     for event in events {
         let app_name = &event.app_context.app_name;
         *app_counts.entry(app_name.clone()).or_insert(0) += 1;
     }
-    
+
     // Get top apps
     let mut app_list: Vec<_> = app_counts.into_iter().collect();
     app_list.sort_by(|a, b| b.1.cmp(&a.1));
-    
+
     result.push_str("## Application Usage\n\n");
     result.push_str("| Application | Event Count |\n");
     result.push_str("|-------------|-------------|\n");
-    
+
     for (app, count) in app_list.iter().take(5) {
         result.push_str(&format!("| {} | {} |\n", app, count));
     }
-    
+
     result.push_str("\n");
-    
+
     // Count event types
     let mut event_type_counts: HashMap<String, usize> = HashMap::new();
     for event in events {
         *event_type_counts.entry(event.event.clone()).or_insert(0) += 1;
     }
-    
+
     result.push_str("## Event Types\n\n");
     result.push_str("| Event Type | Count |\n");
     result.push_str("|------------|-------|\n");
-    
+
     for (event_type, count) in event_type_counts.iter() {
         result.push_str(&format!("| {} | {} |\n", event_type, count));
     }
-    
+
     result.push_str("\n");
-    
+
     // Sample of unique window titles
     let mut window_titles: HashSet<String> = HashSet::new();
-    for event in events.iter().take(100) { // Limit to first 100 events
+    for event in events.iter().take(100) {
+        // Limit to first 100 events
         window_titles.insert(event.app_context.window_title.clone());
     }
-    
+
     if !window_titles.is_empty() {
         result.push_str("## Sample Window Titles\n\n");
-        for title in window_titles.iter().take(5) { // Limit to 5 titles
+        for title in window_titles.iter().take(5) {
+            // Limit to 5 titles
             result.push_str(&format!("- {}\n", title));
         }
     }
-    
+
     result
 }
 
@@ -382,7 +398,7 @@ async fn generate_ai_response(
         
         Please format your response as follows:
         1. A brief 1-2 sentence natural summary of what the user was doing
-        2. A markdown table with the most relevant information (app usage, activity types, etc.)
+        2. A markdown table with each app's most relevent activity
         3. 1-2 brief insights or patterns you notice (optional)
         
         Keep your entire response under 15 lines for readability.
@@ -392,13 +408,13 @@ async fn generate_ai_response(
         DO NOT use any prefix like 'Here's what I found:' - just start directly with the summary.",
         timeframe, query, raw_data
     );
-    
+
     // Get a lock on the LLM client
     let client = llm_client.lock().await;
-    
+
     // Generate the response
     let response = client.generate_text(&prompt).await?;
-    
+
     Ok(response)
 }
 
@@ -408,12 +424,14 @@ fn format_summaries_simple(
     timeframe: &str,
 ) -> String {
     let mut result = format!("Here's what I found for {}:\n\n", timeframe);
-    
+
     for (i, summary) in summaries.iter().enumerate() {
-        let time_range = format!("{} to {}", 
+        let time_range = format!(
+            "{} to {}",
             summary.start_time.format("%H:%M"),
-            summary.end_time.format("%H:%M"));
-            
+            summary.end_time.format("%H:%M")
+        );
+
         result.push_str(&format!(
             "{}. {} - {} ({} events)\n",
             i + 1,
@@ -422,34 +440,32 @@ fn format_summaries_simple(
             summary.events.len()
         ));
     }
-    
+
     result
 }
 
 /// Simple formatter for events (fallback if AI fails)
-fn format_events_simple(
-    events: &[UserEvent],
-    timeframe: &str,
-) -> String {
+fn format_events_simple(events: &[UserEvent], timeframe: &str) -> String {
     let mut result = format!("Here's what I found for {}:\n\n", timeframe);
-    
+
     // Count apps
     let mut app_counts: HashMap<String, usize> = HashMap::new();
     for event in events {
         let app_name = &event.app_context.app_name;
         *app_counts.entry(app_name.clone()).or_insert(0) += 1;
     }
-    
+
     // Get top apps
     let mut app_list: Vec<_> = app_counts.into_iter().collect();
     app_list.sort_by(|a, b| b.1.cmp(&a.1));
-    
+
     result.push_str("Top applications used:\n");
     for (i, (app, count)) in app_list.iter().take(3).enumerate() {
         result.push_str(&format!("{}. {} ({} events)\n", i + 1, app, count));
     }
-    
+
     result.push_str(&format!("\nTotal events found: {}", events.len()));
-    
+
     result
 }
+
