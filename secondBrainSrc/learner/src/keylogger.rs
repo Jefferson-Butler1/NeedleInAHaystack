@@ -144,31 +144,9 @@ impl Keylogger {
                                             text.contains(".dev")
                                         }
 
-                                        // Normalize app name for better categorization
-                                        let display_app_name = if is_browser {
-                                            // Add a prefix to make it clearer this is a browser in logs
-                                            if normalized_app_name.contains("zen") {
-                                                "Browser (Zen)".to_string()
-                                            } else if normalized_app_name.contains("chrome") {
-                                                "Browser (Chrome)".to_string()
-                                            } else if normalized_app_name.contains("firefox") {
-                                                "Browser (Firefox)".to_string()
-                                            } else if normalized_app_name.contains("safari") {
-                                                "Browser (Safari)".to_string()
-                                            } else {
-                                                format!("Browser ({})", window.app_name)
-                                            }
-                                        } else if normalized_app_name.contains("terminal") || 
-                                                  normalized_app_name.contains("iterm") ||
-                                                  normalized_app_name.contains("console") ||
-                                                  normalized_app_name.contains("ghostty") {
-                                            "Terminal".to_string()
-                                        } else {
-                                            window.app_name.clone()
-                                        };
-                                        
+                                        // Keep the original app name for specificity
                                         AppContext {
-                                            app_name: display_app_name,
+                                            app_name: window.app_name,
                                             window_title: window.title,
                                             url: browser_url,
                                         }
