@@ -29,34 +29,6 @@ impl Keylogger {
             let mut alt_pressed = false;
             let mut meta_pressed = false;
 
-            // Helper function to extract URLs from window titles
-            fn get_url_from_title(title: &str) -> Option<String> {
-                let title = title.trim();
-                
-                // Pattern 1: URL at beginning until separator
-                if let Some(i) = title.find(" - ") {
-                    let potential_url = title.split_at(i).0.trim();
-                    if is_likely_url(potential_url) {
-                        return Some(potential_url.to_string());
-                    }
-                }
-                
-                // Pattern 2: URL at end after separator
-                if let Some(i) = title.rfind(" | ") {
-                    let potential_url = title.split_at(i+3).1.trim();
-                    if is_likely_url(potential_url) {
-                        return Some(potential_url.to_string());
-                    }
-                }
-                
-                // Pattern 3: Title looks like a URL itself
-                if is_likely_url(title) {
-                    return Some(title.to_string());
-                }
-                
-                None
-            }
-            
             // Helper function to check if string looks like a URL
             fn is_likely_url(text: &str) -> bool {
                 let text = text.trim();
@@ -86,69 +58,93 @@ impl Keylogger {
                                 // Get current active window info
                                 let app_context = match active_win::get_active_window() {
                                     Ok(window) => {
-                                        // Normalize app name for better categorization
-                                        let normalized_app_name = window.app_name.to_lowercase();
+                                        // Debug output to see what app name actually comes through
+                                        println!("Debug - Window title: {}, App name: {}", window.title, window.app_name);
                                         
-                                        // Detect browser type
-                                        let is_browser = normalized_app_name.contains("zen") || 
-                                                         normalized_app_name.contains("chrome") || 
-                                                         normalized_app_name.contains("firefox") || 
-                                                         normalized_app_name.contains("safari") || 
-                                                         normalized_app_name.contains("edge") ||
-                                                         normalized_app_name.contains("opera") ||
-                                                         normalized_app_name.contains("brave");
-                                        
-                                        // Extract URL from title for browsers
-                                        let browser_url = if is_browser {
-                                            // Try to extract URL using several common patterns
+                                        // Directly check for monkeytype in the title as a special case
+                                        if window.title.contains("monkeytype") {
+                                            // This is a monkeytype session, explicitly mark as Zen browser
+                                            let modified_app_name = "Zen Browser".to_string();
+                                            let browser_url = if window.title.contains("https://") {
+                                                // Extract URL if present
+                                                Some(window.title.to_string())
+                                            } else {
+                                                // Default to monkeytype website
+                                                Some("https://monkeytype.com".to_string())
+                                            };
                                             
-                                            // Pattern 1: URL at beginning until separator
-                                            if let Some(i) = window.title.find(" - ") {
-                                                let potential_url = window.title.split_at(i).0.trim();
-                                                if is_likely_url(potential_url) {
-                                                    Some(potential_url.to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            } 
-                                            // Pattern 2: URL at end after separator
-                                            else if let Some(i) = window.title.rfind(" | ") {
-                                                let potential_url = window.title.split_at(i+3).1.trim();
-                                                if is_likely_url(potential_url) {
-                                                    Some(potential_url.to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            }
-                                            // Pattern 3: Title looks like a URL itself
-                                            else if is_likely_url(&window.title) {
-                                                Some(window.title.clone())
-                                            } 
-                                            else {
-                                                None
+                                            AppContext {
+                                                app_name: modified_app_name,
+                                                window_title: window.title,
+                                                url: browser_url,
                                             }
                                         } else {
-                                            None
-                                        };
+                                            // Normal processing for other cases
+                                            let normalized_app_name = window.app_name.to_lowercase();
+                                            
+                                            // Detect browser type - now includes more possibilities for Zen
+                                            let is_browser = normalized_app_name.contains("zen") || 
+                                                            window.title.contains("mozilla") ||  // Zen is based on Mozilla
+                                                            window.title.contains("firefox") ||  // Additional Firefox clues
+                                                            normalized_app_name.contains("chrome") || 
+                                                            normalized_app_name.contains("firefox") || 
+                                                            normalized_app_name.contains("safari") || 
+                                                            normalized_app_name.contains("edge") ||
+                                                            normalized_app_name.contains("opera") ||
+                                                            normalized_app_name.contains("brave");
                                         
-                                        // Helper function to check if string looks like a URL
-                                        fn is_likely_url(text: &str) -> bool {
-                                            let text = text.trim();
-                                            text.starts_with("http") || 
-                                            text.starts_with("www.") || 
-                                            text.contains(".com") ||
-                                            text.contains(".org") ||
-                                            text.contains(".net") ||
-                                            text.contains(".io") ||
-                                            text.contains(".app") ||
-                                            text.contains(".dev")
-                                        }
+                                            // Extract URL from title for browsers
+                                            let browser_url = if is_browser {
+                                                // Try to extract URL using several common patterns
+                                                
+                                                // Pattern 1: URL at beginning until separator
+                                                if let Some(i) = window.title.find(" - ") {
+                                                    let potential_url = window.title.split_at(i).0.trim();
+                                                    if is_likely_url(potential_url) {
+                                                        Some(potential_url.to_string())
+                                                    } else {
+                                                        None
+                                                    }
+                                                } 
+                                                // Pattern 2: URL at end after separator
+                                                else if let Some(i) = window.title.rfind(" | ") {
+                                                    let potential_url = window.title.split_at(i+3).1.trim();
+                                                    if is_likely_url(potential_url) {
+                                                        Some(potential_url.to_string())
+                                                    } else {
+                                                        None
+                                                    }
+                                                }
+                                                // Pattern 3: Title looks like a URL itself
+                                                else if is_likely_url(&window.title) {
+                                                    Some(window.title.clone())
+                                                } 
+                                                else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            };
 
-                                        // Keep the original app name for specificity
-                                        AppContext {
-                                            app_name: window.app_name,
-                                            window_title: window.title,
-                                            url: browser_url,
+                                            // Special handling for browsers to make them more identifiable
+                                            let display_app_name = if is_browser && !normalized_app_name.contains("zen") {
+                                                // For known browsers, make the app name clearer
+                                                if window.title.contains("monkeytype") {
+                                                    "Zen Browser".to_string()
+                                                } else {
+                                                    // Keep original name but with Browser prefix for clarity
+                                                    format!("{} Browser", window.app_name)
+                                                }
+                                            } else {
+                                                // For non-browsers or already-identified browsers, keep original name
+                                                window.app_name.clone()
+                                            };
+                                            
+                                            AppContext {
+                                                app_name: display_app_name,
+                                                window_title: window.title,
+                                                url: browser_url,
+                                            }
                                         }
                                     }
                                     Err(_) => AppContext {
