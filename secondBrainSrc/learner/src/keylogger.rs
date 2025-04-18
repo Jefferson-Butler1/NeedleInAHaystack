@@ -1,4 +1,3 @@
-use active_win_pos_rs as active_win;
 use activity_tracker_common::{listener, AppContext, UserEvent};
 use chrono::Utc;
 use rdev::{EventType as RdevEventType, Key};
@@ -53,10 +52,8 @@ impl Keylogger {
                                 // For non-modifier keys, record the event
                                 let key_str = format!("{:?}", key);
 
-                                // Get the current active window for EACH keypress
-                                // This is critical - we MUST check active window for every single keypress
-                                let window_info = get_active_window_info();
-                                println!("Keystroke: {} in app: {}, event target: {}", key_str, window_info.app_name, event.target_app);
+                                // Get window info from the enhanced event
+                                println!("Keystroke: {} in app: {}", key_str, event.target_app);
 
                                 // Build modifiers list
                                 let mut modifiers = Vec::new();
@@ -80,17 +77,30 @@ impl Keylogger {
                                 })
                                 .to_string();
 
+                                // Get window title if available or generate one from app name
+                                let window_title = event.window_title.clone().unwrap_or_else(|| 
+                                    extract_window_title_from_target(&event.target_app)
+                                );
+                                let url = extract_url_from_title(&window_title, &event.target_app);
+
+                                // Create app context from the target_app
+                                let app_context = AppContext {
+                                    app_name: event.target_app.clone(),
+                                    window_title,
+                                    url,
+                                };
+
                                 // Create the user event with the active window info
-                                let event = UserEvent {
+                                let user_event = UserEvent {
                                     timestamp: Utc::now(),
                                     event: "keystroke".to_string(),
                                     data: key_data,
-                                    app_context: window_info,
+                                    app_context,
                                 };
 
                                 // Add to buffer
                                 let mut buffer = buffer_clone.lock().unwrap();
-                                buffer.push_back(event);
+                                buffer.push_back(user_event);
 
                                 // If buffer is full, remove oldest event
                                 if buffer.len() > MAX_BUFFER_SIZE {
@@ -128,34 +138,12 @@ impl Keylogger {
     }
 }
 
-/// Get information about the currently active window
-fn get_active_window_info() -> AppContext {
-    // Get current active window
-    match active_win::get_active_window() {
-        Ok(window) => {
-            // Additional logging to debug window detection issues
-            println!(
-                "🔍 WINDOW DETECTION - Title: '{}', App: '{}', full_data: {:#?}",
-                window.title, window.app_name, window
-            );
-            // Extract URL from window title for browser windows
-            let url = extract_url_from_title(&window.title, &window.app_name);
-            // Create the app context
-            AppContext {
-                app_name: window.app_name,
-                window_title: window.title,
-                url,
-            }
-        }
-        Err(_) => {
-            println!("Failed to get active window info");
-            AppContext {
-                app_name: "unknown".to_string(),
-                window_title: "unknown".to_string(),
-                url: None,
-            }
-        }
-    }
+/// Extract window title from target app information
+/// Since the WindowListener only gives us the app name, we'll do our best to construct a meaningful title
+fn extract_window_title_from_target(target_app: &str) -> String {
+    // For now, we just use the app name as the title
+    // In a real implementation, we'd need to enhance the WindowListener to include window title
+    target_app.to_string()
 }
 
 /// Extracts a URL from a window title if one exists

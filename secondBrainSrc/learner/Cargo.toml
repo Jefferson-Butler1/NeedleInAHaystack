@@ -12,7 +12,5 @@ async-trait = { workspace = true }
 sqlx = { workspace = true }
 dotenv = "0.15"
 rdev = "0.5.3"
-# For getting window/app info (cross-platform)
-active-win-pos-rs = "0.9.0"
 # local dependencies
 activity-tracker-common = { path = "../common" }

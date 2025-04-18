@@ -14,6 +14,7 @@ use std::process::Command as ProcessCommand;
 pub struct EnhancedEvent {
     pub event: Event,
     pub target_app: String,
+    pub window_title: Option<String>,
 }
 
 pub struct WindowListener {
@@ -49,7 +50,13 @@ impl WindowListener {
 
         listen(move |event: Event| {
             let target_app = active_window.lock().unwrap().clone();
-            let enhanced_event = EnhancedEvent { event, target_app };
+            // For now, window title is None since we don't have access to it through rdev
+            // In a future enhancement, we could capture this information using OS-specific APIs
+            let enhanced_event = EnhancedEvent { 
+                event, 
+                target_app,
+                window_title: None,
+            };
 
             callback(enhanced_event);
         })
